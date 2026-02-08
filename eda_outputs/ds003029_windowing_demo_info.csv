@@ -1,0 +1,4 @@
+subject,run,sfreq,n_channels,n_samples_segment,segment_sec,window_sec,step_sec,n_windows,n_features,y_pos,y_neg
+jh101,1,1000.0,16,142200,142.2,2.0,1.0,141,14,23,118
+jh101,2,1000.0,16,338175,338.175,2.0,1.0,337,14,211,126
+jh101,3,1000.0,16,142200,142.2,2.0,1.0,141,14,23,118

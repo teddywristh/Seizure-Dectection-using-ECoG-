@@ -1,0 +1,30 @@
+trial_type,count
+sz onset,27
+SZ EVENT # (PB SZ),19
+onset,19
+SZ EVENT #(PB SZ),7
+clinical onset,7
+SZ EVENT # (EEG SZ),5
+Onset,5
+eeg sz start,5
+Z ELECTROGRAPHIC ONS,4
+z clinical onset,4
+definite onset,2
+eeg onset,2
+* poss r onset,1
+Z CLINICAL ONSET,1
+AD1-3 onset,1
+onset TT3,1
+sz onset #18,1
+sz onset #19,1
+SEIZURE #17 ONSET,1
+sz #12 onset,1
+EEG onset,1
+DEFINITE ONSET,1
+??clinical onset??,1
+sz onset #3,1
+?onset ?TT1 then PST,1
+"onset TT1, PST1, MST",1
+??clinical onset,1
+?onset of facial aut,1
+ictal onset,1
