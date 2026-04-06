@@ -13,8 +13,8 @@ selected_seasonal_period_seconds: none
 ==============================================================================
 Dep. Variable:                    rms   No. Observations:                  112
 Model:                 ARIMA(1, 0, 0)   Log Likelihood                1077.036
-Date:                Mon, 06 Apr 2026   AIC                          -2148.071
-Time:                        23:47:08   BIC                          -2139.943
+Date:                Tue, 07 Apr 2026   AIC                          -2148.071
+Time:                        00:29:10   BIC                          -2139.943
 Sample:                             0   HQIC                         -2144.774
                                 - 112                                         
 Covariance Type:                  opg                                         
