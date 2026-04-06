@@ -1,9 +1,2 @@
-trial_type,count
-offset,32
-sz offset,26
-Z ELECTROGRAPHIC END,8
-Offset,5
-eeg sz end,5
-OFFSET,1
-offset with attenuta,1
-offset with attenuat,1
+trial_type,count
+Z ELECTROGRAPHIC END,4

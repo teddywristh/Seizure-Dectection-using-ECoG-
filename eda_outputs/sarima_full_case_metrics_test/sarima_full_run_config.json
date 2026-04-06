@@ -1,0 +1,21 @@
+{
+  "feature_columns": [
+    "series_id",
+    "t_mid_s",
+    "rms",
+    "ptp",
+    "line_length",
+    "rms_lag_1",
+    "rms_lag_2",
+    "y"
+  ],
+  "target_col": "rms",
+  "time_col": "t_mid_s",
+  "series_col": "series_id",
+  "exog_cols": [
+    "ptp",
+    "line_length",
+    "rms_lag_1",
+    "rms_lag_2"
+  ]
+}

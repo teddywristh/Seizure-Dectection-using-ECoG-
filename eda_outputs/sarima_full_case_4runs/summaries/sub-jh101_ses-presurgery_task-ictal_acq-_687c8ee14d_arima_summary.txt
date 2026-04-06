@@ -1,0 +1,30 @@
+                               SARIMAX Results                                
+==============================================================================
+Dep. Variable:                    rms   No. Observations:                  150
+Model:                 ARIMA(1, 0, 1)   Log Likelihood                1323.314
+Date:                Sun, 05 Apr 2026   AIC                          -2630.628
+Time:                        23:55:03   BIC                          -2606.543
+Sample:                             0   HQIC                         -2620.843
+                                - 150                                         
+Covariance Type:                  opg                                         
+===============================================================================
+                  coef    std err          z      P>|z|      [0.025      0.975]
+-------------------------------------------------------------------------------
+const        7.462e-05   8.13e-06      9.182      0.000    5.87e-05    9.05e-05
+ptp             0.0231      0.001     18.331      0.000       0.021       0.026
+line_length    -0.0065      0.001     -4.551      0.000      -0.009      -0.004
+rms_lag_1       0.9145   5.16e-05   1.77e+04      0.000       0.914       0.915
+rms_lag_2      -0.2902   2.66e-05  -1.09e+04      0.000      -0.290      -0.290
+ar.L1          -0.8385   3.84e-06  -2.19e+05      0.000      -0.838      -0.838
+ma.L1        5.625e-06   3.01e-06      1.867      0.062   -2.78e-07    1.15e-05
+sigma2       9.291e-10   2.55e-10      3.648      0.000     4.3e-10    1.43e-09
+===================================================================================
+Ljung-Box (L1) (Q):                  34.36   Jarque-Bera (JB):                10.29
+Prob(Q):                              0.00   Prob(JB):                         0.01
+Heteroskedasticity (H):               0.63   Skew:                             0.55
+Prob(H) (two-sided):                  0.11   Kurtosis:                         3.65
+===================================================================================
+
+Warnings:
+[1] Covariance matrix calculated using the outer product of gradients (complex-step).
+[2] Covariance matrix is singular or near-singular, with condition number 2.74e+21. Standard errors may be unstable.

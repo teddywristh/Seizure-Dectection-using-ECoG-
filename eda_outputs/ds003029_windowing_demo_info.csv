@@ -1,4 +1,2 @@
-subject,run,sfreq,n_channels,n_samples_segment,segment_sec,window_sec,step_sec,n_windows,n_features,y_pos,y_neg
-jh101,1,1000.0,16,142200,142.2,2.0,1.0,141,14,23,118
-jh101,2,1000.0,16,338175,338.175,2.0,1.0,337,14,211,126
-jh101,3,1000.0,16,142200,142.2,2.0,1.0,141,14,23,118
+base,t0,t1,sfreq,window_sec,step_sec,n_channels_used,n_windows
+C:\Users\admin\OneDrive - National Economics University\Documents\TÀI LIỆU\GIÁO TRÌNH HỌC\TIME SERIES\Seizure-Dectection-using-ECoG-\EEG\ds003029\sub-jh101\ses-presurgery\ieeg\sub-jh101_ses-presurgery_task-ictal_acq-ecog_run-01_ieeg,0.0,142.199,1000.0,2.0,1.0,16,141
