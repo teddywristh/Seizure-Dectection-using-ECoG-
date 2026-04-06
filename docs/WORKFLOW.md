@@ -1,39 +1,36 @@
-# Workflow — ds003029 EDA (refactored)
+# Workflow - ds003029 on branch `bim`
 
 ## Big picture
-EDA được chia làm 2 lớp:
-- **Metadata-only (full coverage)**: quét BIDS sidecars (`*_events.tsv`, `*_channels.tsv`, `*_ieeg.json`, …) để tạo các bảng tổng hợp trong `eda_outputs/` mà **không cần tải `*.eeg`**.
-- **Signal-level (subset)**: chỉ load một vài run có content thật (`*.vhdr/*.vmrk/*.eeg`) để QC tín hiệu, sanity-check markers, và demo windowing/features.
+Pipeline hien tai co 4 lop:
+- Metadata-only: quet BIDS sidecars de lap inventory run, channels, events.
+- Marker QC: chuan hoa onset/offset va ghep seizure intervals.
+- Signal-level features: doc BrainVision bang MNE, cat window, trich `rms`, `ptp`, `line_length`, va label `y`.
+- Modeling: fit SARIMA thuan theo tung run tren chuoi `rms`.
 
-## The pipeline notebooks (run in order)
-1) [notebooks/01_metadata_run_summary_ds003029.ipynb](../notebooks/01_metadata_run_summary_ds003029.ipynb)
-   - Tạo `ds003029_run_summary.csv` + `ds003029_event_vocab.csv`
-   - Mục tiêu: inventory toàn dataset, xác định run nào có marker / có đủ metadata / có khả năng load signal
+## Main execution order
+1. `notebooks/01_metadata_run_summary_ds003029.ipynb`
+   - Tao `ds003029_run_summary.csv` va `ds003029_event_vocab.csv`
+2. `notebooks/02_marker_qc_intervals_ds003029.ipynb`
+   - Tao `ds003029_marker_qc_by_run.csv` va `ds003029_seizure_intervals_by_run.csv`
+3. `notebooks/03_signal_eda_windows_features_ds003029.ipynb`
+   - Tao feature windows de train model
+4. `notebooks/04_sarima_training_ds003029.ipynb`
+   - Train SARIMA thuan tren tung run voi chronological train/test split
 
-2) [notebooks/02_marker_qc_intervals_ds003029.ipynb](../notebooks/02_marker_qc_intervals_ds003029.ipynb)
-   - Tạo bảng QC marker + bảng intervals (onset/offset) an toàn cho multi-seizure
-   - Các file chính:
-     - `ds003029_marker_qc_by_run.csv`
-     - `ds003029_seizure_intervals_by_run.csv`
-     - `ds003029_trial_type_*_vocab.csv`
+## Reusable code
+- `src/ds003029_eda/paths.py`: resolve workspace, dataset, output paths
+- `src/ds003029_eda/run_summary.py`: build metadata inventory
+- `src/ds003029_eda/markers.py`: parse onset/offset markers
+- `src/ds003029_eda/marker_qc.py`: build QC tables and seizure intervals
+- `src/ds003029_eda/window_features_multirun.py`: build multirun window features
+- `src/ds003029_eda/sarima_training.py`: train pure SARIMA without exogenous regressors
 
-3) [notebooks/03_signal_eda_windows_features_ds003029.ipynb](../notebooks/03_signal_eda_windows_features_ds003029.ipynb)
-   - Load 1 run (ưu tiên run có intervals), crop quanh seizure (nếu có), plot waveform + PSD, rồi windowing + features demo
-   - Xuất:
-     - `ds003029_window_features_demo.csv`
-     - `ds003029_windowing_demo_info.csv`
+## Scripts
+- `tools/analyze_event_markers_ds003029.py`
+- `tools/build_window_features_multirun_full.py`
+- `tools/train_sarima.py`
+- `tools/validate_labels_ds003029.py`
 
-## Reusable code (thin notebooks)
-- Logic dùng chung nằm ở [src/ds003029_eda](../src/ds003029_eda):
-  - `paths.py`: chuẩn hoá đường dẫn workspace/dataset/outputs
-  - `run_summary.py`: build/export `run_summary` + `event_vocab`
-  - `markers.py`: regex & parsing onset/offset + pairing intervals
-  - `marker_qc.py`: build/export QC + interval/vocab tables
-
-## Validation helper
-- Script đối chiếu nhanh labels: [tools/validate_labels_ds003029.py](../tools/validate_labels_ds003029.py)
-  - Chạy sau khi có `ds003029_run_summary.csv`.
-
-## Where legacy work went
-- Mục tiêu là thay thế phần “core pipeline” bằng 01→02→03.
-- Nếu bạn cần tham khảo lại notebook/docs cũ (trước refactor), chúng sẽ được đưa vào `archive/`.
+## Notes
+- Nhanh `bim` khong con giu workflow ARIMAX cu lam duong train chinh nua.
+- Neu can chay tu command line, xem `docs/SARIMA_TRAINING.md`.

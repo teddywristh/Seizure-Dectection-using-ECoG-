@@ -1,22 +1,28 @@
-# ds003029 — EEG/iEEG EDA (refactored)
+# ds003029 - EEG/iEEG EDA and SARIMA training
 
-Mục tiêu workspace: EDA tối giản nhưng đầy đủ luồng **raw BIDS → metadata EDA → marker QC/intervals → signal EDA (subset) → windowing/features demo**.
+Muc tieu workspace tren nhanh `bim`: giu pipeline BIDS -> marker QC -> window features -> train SARIMA thuan cho du lieu ECoG/iEEG.
 
-## Quick start (the intended pipeline)
-1) **Step 01 — metadata inventory**: open and run [notebooks/01_metadata_run_summary_ds003029.ipynb](notebooks/01_metadata_run_summary_ds003029.ipynb)
+## Quick start
+1. Metadata inventory: run `notebooks/01_metadata_run_summary_ds003029.ipynb`
    - Outputs: `eda_outputs/ds003029_run_summary.csv`, `eda_outputs/ds003029_event_vocab.csv`
+2. Marker QC and seizure intervals: run `notebooks/02_marker_qc_intervals_ds003029.ipynb`
+   - Outputs: `eda_outputs/ds003029_marker_qc_by_run.csv`, `eda_outputs/ds003029_seizure_intervals_by_run.csv`
+3. Signal EDA and window features: run `notebooks/03_signal_eda_windows_features_ds003029.ipynb`
+   - Requires local BrainVision content (`*.vhdr`, `*.vmrk`, `*.eeg`)
+4. SARIMA training:
+   - Notebook path: `notebooks/04_sarima_training_ds003029.ipynb`
+   - CLI path: `python tools/train_sarima.py --build-multirun-features`
 
-2) **Step 02 — marker QC + seizure intervals**: open and run [notebooks/02_marker_qc_intervals_ds003029.ipynb](notebooks/02_marker_qc_intervals_ds003029.ipynb)
-   - Outputs: `eda_outputs/ds003029_marker_qc_by_run.csv`, `eda_outputs/ds003029_seizure_intervals_by_run.csv`, onset/offset vocabs
-
-3) **Step 03 — signal EDA + windowing/features demo**: open and run [notebooks/03_signal_eda_windows_features_ds003029.ipynb](notebooks/03_signal_eda_windows_features_ds003029.ipynb)
-   - Requires: MNE + at least one run’s `*.vhdr/*.vmrk/*.eeg` content present locally
-   - Outputs: `eda_outputs/ds003029_window_features_demo.csv`, `eda_outputs/ds003029_windowing_demo_info.csv`
-
-## Docs
-- Workflow overview: [docs/WORKFLOW.md](docs/WORKFLOW.md)
-- Data access (git-annex minimal): [docs/DATA_ACCESS.md](docs/DATA_ACCESS.md)
+## Main docs
+- `docs/WORKFLOW.md`
+- `docs/DATA_ACCESS.md`
+- `docs/SARIMA_TRAINING.md`
 
 ## Code organization
-- Shared logic lives in [src/ds003029_eda](src/ds003029_eda) (thin notebooks; reusable code).
-- Utility scripts live in [tools](tools).
+- Shared logic lives in `src/ds003029_eda/`
+- Command-line scripts live in `tools/`
+- Generated artifacts live in `eda_outputs/`
+
+## Modeling note
+- Pipeline modeling chinh tren nhanh `bim` la SARIMA thuần.
+- Danh gia duoc thuc hien bang chia chuoi theo thoi gian train/test, khong dung `exog`, khong dung SARIMAX.
