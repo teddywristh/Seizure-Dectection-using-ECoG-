@@ -56,10 +56,13 @@ class FitArtifacts:
     series_id: str
     n_obs: int
     cadence_s: float
+    candidate_seasonal_periods: list[int]
     target_col: str
     exog_cols: list[str]
     selected_order: tuple[int, int, int]
     selected_seasonal_order: tuple[int, int, int, int]
+    selected_seasonal_period_steps: int | None
+    selected_seasonal_period_seconds: float | None
     baseline_order: tuple[int, int, int]
     baseline_aic: float | None
     sarima_aic: float | None
@@ -317,6 +320,52 @@ def _safe_series_filename(series_id: str) -> str:
     return f"{cleaned[:18]}_{digest}"
 
 
+def _seasonal_period_seconds(
+    seasonal_order: tuple[int, int, int, int],
+    cadence_s: float,
+) -> float | None:
+    period_steps = seasonal_order[3]
+    if period_steps <= 0 or cadence_s <= 0:
+        return None
+    return float(period_steps * cadence_s)
+
+
+def _summary_metadata_block(
+    *,
+    series_id: str,
+    cadence_s: float,
+    candidate_seasonal_periods: list[int],
+    selected_order: tuple[int, int, int],
+    selected_seasonal_order: tuple[int, int, int, int],
+) -> str:
+    period_steps = selected_seasonal_order[3] if selected_seasonal_order[3] > 0 else None
+    period_seconds = _seasonal_period_seconds(selected_seasonal_order, cadence_s)
+    lines = [
+        "Custom SARIMA metadata",
+        f"series_id: {series_id}",
+        f"cadence_s: {cadence_s}",
+        f"candidate_seasonal_periods_steps: {candidate_seasonal_periods}",
+        f"selected_order: {selected_order}",
+        f"selected_seasonal_order: {selected_seasonal_order}",
+        (
+            "selected_seasonal_period_steps: none"
+            if period_steps is None
+            else f"selected_seasonal_period_steps: {period_steps}"
+        ),
+        (
+            "selected_seasonal_period_seconds: none"
+            if period_seconds is None
+            else f"selected_seasonal_period_seconds: {period_seconds}"
+        ),
+        (
+            "interpretation: seasonal periods are measured in time steps, "
+            "not seizure counts"
+        ),
+        "",
+    ]
+    return "\n".join(lines)
+
+
 def fit_full_dataset_models(
     prepared: PreparedData,
     *,
@@ -333,16 +382,21 @@ def fit_full_dataset_models(
 
     for series_id, group in prepared.df.groupby(prepared.series_col, sort=True):
         group = group.sort_values(prepared.time_col).reset_index(drop=True)
+        cadence_s = float(group[prepared.time_col].diff().median() or 0.0)
+        seasonal_periods = _infer_seasonal_periods(len(group))
         if len(group) < 25:
             metrics.append(
                 FitArtifacts(
                     series_id=str(series_id),
                     n_obs=int(len(group)),
-                    cadence_s=float(group[prepared.time_col].diff().median() or 0.0),
+                    cadence_s=cadence_s,
+                    candidate_seasonal_periods=seasonal_periods,
                     target_col=prepared.target_col,
                     exog_cols=prepared.exog_cols,
                     selected_order=(0, 0, 0),
                     selected_seasonal_order=(0, 0, 0, 0),
+                    selected_seasonal_period_steps=None,
+                    selected_seasonal_period_seconds=None,
                     baseline_order=(1, 0, 1),
                     baseline_aic=None,
                     sarima_aic=None,
@@ -372,8 +426,6 @@ def fit_full_dataset_models(
 
         y = group[prepared.target_col]
         exog = group[prepared.exog_cols]
-        cadence_s = float(group[prepared.time_col].diff().median() or 0.0)
-        seasonal_periods = _infer_seasonal_periods(len(group))
 
         baseline_result = _fit_arima_baseline(y, exog)
         sarima_result, best_order, best_seasonal_order = _fit_best_sarima(
@@ -396,7 +448,14 @@ def fit_full_dataset_models(
         safe_name = _safe_series_filename(str(series_id))
         pred_df.to_csv(predictions_dir / f"{safe_name}_full_fit_predictions.csv", index=False)
         (summaries_dir / f"{safe_name}_sarima_summary.txt").write_text(
-            sarima_result.summary().as_text(),
+            _summary_metadata_block(
+                series_id=str(series_id),
+                cadence_s=cadence_s,
+                candidate_seasonal_periods=seasonal_periods,
+                selected_order=best_order,
+                selected_seasonal_order=best_seasonal_order,
+            )
+            + sarima_result.summary().as_text(),
             encoding="utf-8",
         )
         (summaries_dir / f"{safe_name}_arima_summary.txt").write_text(
@@ -410,10 +469,18 @@ def fit_full_dataset_models(
                 series_id=str(series_id),
                 n_obs=int(len(group)),
                 cadence_s=cadence_s,
+                candidate_seasonal_periods=seasonal_periods,
                 target_col=prepared.target_col,
                 exog_cols=prepared.exog_cols,
                 selected_order=best_order,
                 selected_seasonal_order=best_seasonal_order,
+                selected_seasonal_period_steps=(
+                    best_seasonal_order[3] if best_seasonal_order[3] > 0 else None
+                ),
+                selected_seasonal_period_seconds=_seasonal_period_seconds(
+                    best_seasonal_order,
+                    cadence_s,
+                ),
                 baseline_order=(1, 0, 1),
                 baseline_aic=float(baseline_result.aic),
                 sarima_aic=float(sarima_result.aic),
@@ -458,6 +525,9 @@ def fit_full_dataset_models(
                 "time_col": prepared.time_col,
                 "series_col": prepared.series_col,
                 "exog_cols": prepared.exog_cols,
+                "candidate_seasonal_periods_base_steps": [4, 6, 12, 24],
+                "seasonal_period_unit": "time steps",
+                "seasonal_period_seconds_formula": "selected_seasonal_period_steps * cadence_s",
             },
             indent=2,
         ),
