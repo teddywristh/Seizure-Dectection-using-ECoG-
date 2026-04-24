@@ -13,6 +13,7 @@ from ds003029_eda.labels.labeler import LabelingConfig
 from ds003029_eda.paths import get_paths
 from ds003029_eda.pipelines.run_features import FeaturePipelineConfig, run_feature_pipeline
 from ds003029_eda.pipelines.run_preprocess import PreprocessPipelineConfig, run_preprocess_pipeline
+from ds003029_eda.pipelines.run_sarima_prep import SarimaPrepConfig, run_sarima_prep
 
 
 def _has_real_eeg_data(workspace_root: Path) -> bool:
@@ -65,6 +66,14 @@ def build_parser() -> argparse.ArgumentParser:
     features_parser.add_argument("--label-margin-sec", type=float, default=0.5)
     features_parser.add_argument("--fill-missing-after-scaling", type=float, default=0.0)
 
+    sarima_parser = subparsers.add_parser(
+        "sarima-prep",
+        help="Export v2 run tensors into SARIMA-ready per-run and combined CSV files.",
+    )
+    add_common_arguments(sarima_parser)
+    sarima_parser.add_argument("--output-subdir", default="sarima")
+    sarima_parser.add_argument("--aggregate-feature-name", default="agg_mean_rms")
+
     full_parser = subparsers.add_parser("full", help="Run preprocessing then feature generation end to end.")
     add_common_arguments(full_parser)
     full_parser.add_argument("--target-sfreq", type=float, default=256.0)
@@ -103,6 +112,15 @@ def _build_feature_config(args: argparse.Namespace) -> FeaturePipelineConfig:
     )
 
 
+def _build_sarima_prep_config(args: argparse.Namespace) -> SarimaPrepConfig:
+    return SarimaPrepConfig(
+        artifact_subdir=args.artifact_subdir,
+        output_subdir=args.output_subdir,
+        aggregate_feature_name=args.aggregate_feature_name,
+        overwrite=args.overwrite,
+    )
+
+
 def main() -> int:
     args = build_parser().parse_args()
     workspace_root = _resolve_workspace_root(args.workspace_root)
@@ -121,6 +139,13 @@ def main() -> int:
         print(f"Feature extraction completed: {run_inventory['feature_ok'].sum()} / {len(run_inventory)} runs")
         print(f"Generated folds: {len(fold_manifest_df)}")
         print(f"Artifact root: {artifact_root.as_posix()}")
+        return 0
+
+    if args.command == "sarima-prep":
+        combined_df, manifest_df, output_root = run_sarima_prep(paths=paths, config=_build_sarima_prep_config(args))
+        print(f"Workspace root: {workspace_root.as_posix()}")
+        print(f"SARIMA prep completed: {len(manifest_df)} series, {len(combined_df)} rows")
+        print(f"Output root: {output_root.as_posix()}")
         return 0
 
     if args.command == "full":
