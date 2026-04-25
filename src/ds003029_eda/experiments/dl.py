@@ -37,6 +37,7 @@ class DLExperimentConfig:
     threshold: float = 0.5
     random_state: int = 42
     early_stopping_patience: int = 5
+    val_fraction: float = 0.15  # fraction of train set used as validation for early stopping
     device: str = "auto"
     mixed_precision: str = "auto"
     pin_memory: bool = True
@@ -113,6 +114,37 @@ def _configure_cuda_backend(torch, *, device, allow_tf32: bool, cudnn_benchmark:
         torch.backends.cudnn.benchmark = bool(cudnn_benchmark)
     if hasattr(torch, "set_float32_matmul_precision") and allow_tf32:
         torch.set_float32_matmul_precision("high")
+
+
+def _stratified_val_split(dataset, *, val_fraction: float, random_state: int):
+    """Split dataset into (train_subset, val_subset) using stratified sampling.
+
+    Early stopping must be performed on val_subset, NOT on the held-out test set.
+    This function uses sklearn StratifiedShuffleSplit to maintain class balance.
+    """
+    from sklearn.model_selection import StratifiedShuffleSplit
+    from torch.utils.data import Subset
+
+    y_all = np.asarray(dataset.y.cpu().numpy(), dtype=int)
+    n = len(y_all)
+    # Ensure val set is large enough to be useful (at least 4 samples)
+    actual_val_fraction = max(4 / n, val_fraction) if n > 0 else val_fraction
+    actual_val_fraction = min(actual_val_fraction, 0.4)  # cap at 40%
+
+    try:
+        splitter = StratifiedShuffleSplit(
+            n_splits=1,
+            test_size=actual_val_fraction,
+            random_state=random_state,
+        )
+        train_idx, val_idx = next(splitter.split(np.zeros(n), y_all))
+    except Exception:
+        # Fallback: simple sequential split if stratification fails
+        val_size = max(1, int(n * actual_val_fraction))
+        train_idx = np.arange(n - val_size)
+        val_idx = np.arange(n - val_size, n)
+
+    return Subset(dataset, train_idx.tolist()), Subset(dataset, val_idx.tolist())
 
 
 def _load_feature_dataset(fold_dir: Path, input_mode: str):
@@ -273,6 +305,7 @@ def run_dl_experiment(
             "cuda_available": bool(torch.cuda.is_available()),
             "cuda_device_name": torch.cuda.get_device_name(0) if device.type == "cuda" else None,
             "resolved_raw_loading_strategy": config.raw_loading_strategy,
+            "early_stopping_monitor": "val_roc_auc (validation split, NOT test set)",
         },
     )
     per_fold_metrics: list[dict[str, Any]] = []
@@ -317,12 +350,23 @@ def run_dl_experiment(
         if loader_kwargs["num_workers"] > 0:
             loader_kwargs["persistent_workers"] = bool(config.persistent_workers)
 
-        train_loader = DataLoader(train_dataset, shuffle=True, **loader_kwargs)
+        # --- Fix Issue #6: validation split for early stopping ---
+        # Checkpoint selection MUST use a held-out validation set, NOT the test set.
+        # We carve a stratified val split from the train set here.
+        train_subset, val_subset = _stratified_val_split(
+            train_dataset,
+            val_fraction=config.val_fraction,
+            random_state=config.random_state,
+        )
+        train_loader = DataLoader(train_subset, shuffle=True, **loader_kwargs)
+        val_loader = DataLoader(val_subset, shuffle=False, **loader_kwargs)
         test_loader = DataLoader(test_dataset, shuffle=False, **loader_kwargs)
 
-        y_train = np.asarray(train_dataset.y.cpu().numpy(), dtype=int)
-        n_pos = max(1, int(np.sum(y_train == 1)))
-        n_neg = max(1, int(np.sum(y_train == 0)))
+        # Compute pos_weight from the full train fold (before val split) to keep the
+        # class-weight estimate stable across different random seeds.
+        y_train_full = np.asarray(train_dataset.y.cpu().numpy(), dtype=int)
+        n_pos = max(1, int(np.sum(y_train_full == 1)))
+        n_neg = max(1, int(np.sum(y_train_full == 0)))
         pos_weight = torch.tensor([n_neg / n_pos], dtype=torch.float32, device=device)
 
         criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
@@ -361,9 +405,10 @@ def run_dl_experiment(
                 train_losses.append(float(loss.item()))
             scheduler.step()
 
-            test_loss, y_true, y_score = _collect_scores(
+            # Evaluate on VALIDATION set (not test) — used only for early stopping / checkpoint selection
+            val_loss, val_y_true, val_y_score = _collect_scores(
                 model,
-                test_loader,
+                val_loader,
                 input_mode=config.input_mode,
                 device=device,
                 torch=torch,
@@ -371,21 +416,22 @@ def run_dl_experiment(
                 amp_dtype=amp_dtype,
                 non_blocking=non_blocking,
             )
-            metrics = compute_binary_metrics(y_true, y_score, threshold=config.threshold)
+            val_metrics = compute_binary_metrics(val_y_true, val_y_score, threshold=config.threshold)
             history_rows.append(
                 {
                     "epoch": float(epoch),
                     "train_loss": float(np.mean(train_losses)) if train_losses else float("nan"),
-                    "test_loss": test_loss,
-                    "roc_auc": metrics["roc_auc"],
-                    "average_precision": metrics["average_precision"],
-                    "f1": metrics["f1"],
-                    "sensitivity": metrics["sensitivity"],
-                    "specificity": metrics["specificity"],
+                    "val_loss": val_loss,
+                    "val_roc_auc": val_metrics["roc_auc"],
+                    "val_average_precision": val_metrics["average_precision"],
+                    "val_f1": val_metrics["f1"],
+                    "val_sensitivity": val_metrics["sensitivity"],
+                    "val_specificity": val_metrics["specificity"],
                 }
             )
 
-            current_metric = metrics["roc_auc"] if np.isfinite(metrics["roc_auc"]) else metrics["average_precision"]
+            # Early stopping criterion: use val ROC-AUC (fallback to val AP)
+            current_metric = val_metrics["roc_auc"] if np.isfinite(val_metrics["roc_auc"]) else val_metrics["average_precision"]
             if current_metric > best_metric:
                 best_metric = current_metric
                 best_epoch = epoch
@@ -420,6 +466,7 @@ def run_dl_experiment(
                 "device": str(device),
                 "raw_loading_strategy": resolved_raw_loading_strategy,
                 "best_epoch": float(best_epoch),
+                "best_val_roc_auc": float(best_metric),
                 "test_loss": test_loss,
             }
         )

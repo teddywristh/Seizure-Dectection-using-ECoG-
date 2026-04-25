@@ -10,7 +10,17 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from sklearn.metrics import mean_absolute_error, mean_squared_error, median_absolute_error, r2_score
+from sklearn.metrics import (
+    average_precision_score,
+    f1_score,
+    mean_absolute_error,
+    mean_squared_error,
+    median_absolute_error,
+    precision_score,
+    r2_score,
+    recall_score,
+    roc_auc_score,
+)
 from statsmodels.stats.diagnostic import acorr_ljungbox
 from statsmodels.tools.sm_exceptions import ConvergenceWarning
 from statsmodels.tsa.arima.model import ARIMA
@@ -78,6 +88,13 @@ class FitArtifacts:
     changepoints_train: list[float]
     changepoints_test: list[float]
     anomaly_count_test: int
+    # Binary classification metrics from anomaly flags vs ground-truth y labels
+    # (Only populated when 'y' column is present in the data — Issue #2 fix)
+    anomaly_precision: float | None
+    anomaly_recall: float | None
+    anomaly_f1: float | None
+    anomaly_average_precision: float | None
+    anomaly_roc_auc: float | None
     status: str
     notes: str
 
@@ -317,6 +334,49 @@ def _flag_residual_anomalies(
     return (series.abs() > (z_threshold * rolling_std)).fillna(False)
 
 
+def _compute_anomaly_binary_metrics(
+    y_true: np.ndarray,
+    anomaly_mask: np.ndarray,
+) -> dict[str, float | None]:
+    """Compute binary classification metrics treating anomaly flags as predictions.
+
+    This resolves the cross-method comparability issue (Issue.md #1/#2):
+    SARIMA anomaly detection is evaluated with the same binary metrics (precision,
+    recall, F1, AP, ROC-AUC) as ML and DL classifiers.
+
+    Returns a dict with keys: anomaly_precision, anomaly_recall, anomaly_f1,
+    anomaly_average_precision, anomaly_roc_auc.  All values are None if y_true
+    has fewer than 2 unique classes (degenerate test window).
+    """
+    y_true_int = np.asarray(y_true, dtype=int)
+    y_pred = np.asarray(anomaly_mask, dtype=int)
+    unique_classes = np.unique(y_true_int)
+    if len(unique_classes) < 2:
+        return {
+            "anomaly_precision": None,
+            "anomaly_recall": None,
+            "anomaly_f1": None,
+            "anomaly_average_precision": None,
+            "anomaly_roc_auc": None,
+        }
+    try:
+        prec = float(precision_score(y_true_int, y_pred, zero_division=0))
+        rec = float(recall_score(y_true_int, y_pred, zero_division=0))
+        f1 = float(f1_score(y_true_int, y_pred, zero_division=0))
+        # Use anomaly flag as a binary probability proxy (0/1) for ranking-based metrics
+        ap = float(average_precision_score(y_true_int, y_pred))
+        auc = float(roc_auc_score(y_true_int, y_pred))
+    except Exception:
+        prec = rec = f1 = ap = auc = None  # type: ignore[assignment]
+    return {
+        "anomaly_precision": prec,
+        "anomaly_recall": rec,
+        "anomaly_f1": f1,
+        "anomaly_average_precision": ap,
+        "anomaly_roc_auc": auc,
+    }
+
+
 def _safe_series_filename(series_id: str) -> str:
     text = str(series_id)
     digest = hashlib.sha1(text.encode("utf-8")).hexdigest()[:10]
@@ -432,6 +492,11 @@ def fit_sarima_models(
                     changepoints_train=[],
                     changepoints_test=[],
                     anomaly_count_test=0,
+                    anomaly_precision=None,
+                    anomaly_recall=None,
+                    anomaly_f1=None,
+                    anomaly_average_precision=None,
+                    anomaly_roc_auc=None,
                     status="skipped",
                     notes=f"Series shorter than {min_total_obs} observations.",
                 )
@@ -470,6 +535,11 @@ def fit_sarima_models(
                     changepoints_train=[],
                     changepoints_test=[],
                     anomaly_count_test=0,
+                    anomaly_precision=None,
+                    anomaly_recall=None,
+                    anomaly_f1=None,
+                    anomaly_average_precision=None,
+                    anomaly_roc_auc=None,
                     status="skipped",
                     notes="Could not form a stable chronological train/test split.",
                 )
@@ -531,6 +601,21 @@ def fit_sarima_models(
         )
 
         all_predictions.append(pred_df)
+
+        # Compute anomaly binary classification metrics vs ground-truth y (Issue #2 fix)
+        anomaly_binary_metrics: dict[str, float | None] = {
+            "anomaly_precision": None,
+            "anomaly_recall": None,
+            "anomaly_f1": None,
+            "anomaly_average_precision": None,
+            "anomaly_roc_auc": None,
+        }
+        if "y" in test_df.columns:
+            y_test_labels = pd.to_numeric(test_df["y"], errors="coerce").fillna(0).astype(int).to_numpy()
+            anomaly_binary_metrics = _compute_anomaly_binary_metrics(
+                y_test_labels, test_anomaly_mask.to_numpy().astype(int)
+            )
+
         metrics.append(
             FitArtifacts(
                 series_id=str(series_id),
@@ -563,6 +648,11 @@ def fit_sarima_models(
                 changepoints_train=train_changepoints,
                 changepoints_test=test_changepoints,
                 anomaly_count_test=int(test_anomaly_mask.sum()),
+                anomaly_precision=anomaly_binary_metrics["anomaly_precision"],
+                anomaly_recall=anomaly_binary_metrics["anomaly_recall"],
+                anomaly_f1=anomaly_binary_metrics["anomaly_f1"],
+                anomaly_average_precision=anomaly_binary_metrics["anomaly_average_precision"],
+                anomaly_roc_auc=anomaly_binary_metrics["anomaly_roc_auc"],
                 status="ok",
                 notes=(
                     "SARIMA/SARIMAX with chronological train/test split, residual changepoint detection, "
