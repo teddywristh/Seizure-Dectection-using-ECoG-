@@ -15,6 +15,11 @@ from statsmodels.stats.diagnostic import acorr_ljungbox
 from statsmodels.tools.sm_exceptions import ConvergenceWarning
 from statsmodels.tsa.arima.model import ARIMA
 
+try:
+    import ruptures as rpt
+except ImportError:  # pragma: no cover - optional dependency
+    rpt = None
+
 if __package__ is None or __package__ == "":
     import sys
 
@@ -39,6 +44,8 @@ class PreparedData:
     target_col: str
     time_col: str
     series_col: str
+    target_feature_name: str
+    exogenous_cols: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -50,6 +57,7 @@ class FitArtifacts:
     cadence_s: float
     target_col: str
     ictal_window_rate: float | None
+    exogenous_cols: tuple[str, ...]
     candidate_orders: list[tuple[int, int, int]]
     candidate_seasonal_periods_steps: list[int]
     selected_order: tuple[int, int, int]
@@ -67,6 +75,9 @@ class FitArtifacts:
     smape_test_pct: float | None
     r2_test: float | None
     ljungbox_pvalue_train_residual: float | None
+    changepoints_train: list[float]
+    changepoints_test: list[float]
+    anomaly_count_test: int
     status: str
     notes: str
 
@@ -121,6 +132,8 @@ def prepare_sarima_dataset(
     feature_path: str | Path | None = None,
     *,
     paths: WorkspacePaths | None = None,
+    target_feature_name: str | None = None,
+    exogenous_cols: tuple[str, ...] = (),
 ) -> PreparedData:
     paths = paths or get_paths()
     resolved_feature_path = _pick_existing_feature_source(paths.outputs_dir, feature_path)
@@ -128,6 +141,8 @@ def prepare_sarima_dataset(
 
     target_col = _infer_target_col(raw_df)
     time_col = _infer_time_col(raw_df)
+    if target_feature_name and target_feature_name in raw_df.columns:
+        target_col = target_feature_name
     if target_col != "rms":
         raw_df = raw_df.rename(columns={target_col: "rms"})
         target_col = "rms"
@@ -140,6 +155,11 @@ def prepare_sarima_dataset(
     if "y" in raw_df.columns:
         raw_df["y"] = pd.to_numeric(raw_df["y"], errors="coerce")
         keep_cols.append("y")
+    for col in exogenous_cols:
+        if col not in raw_df.columns:
+            raise KeyError(f"Requested exogenous column '{col}' was not found in {resolved_feature_path}")
+        raw_df[col] = pd.to_numeric(raw_df[col], errors="coerce")
+        keep_cols.append(col)
 
     prepared = (
         raw_df[keep_cols]
@@ -148,7 +168,14 @@ def prepare_sarima_dataset(
         .reset_index(drop=True)
     )
 
-    return PreparedData(df=prepared, target_col=target_col, time_col=time_col, series_col="series_id")
+    return PreparedData(
+        df=prepared,
+        target_col=target_col,
+        time_col=time_col,
+        series_col="series_id",
+        target_feature_name=target_feature_name or target_col,
+        exogenous_cols=tuple(exogenous_cols),
+    )
 
 
 def _candidate_orders() -> list[tuple[int, int, int]]:
@@ -180,6 +207,7 @@ def _split_series(group: pd.DataFrame, test_fraction: float, min_test_obs: int) 
 def _fit_best_sarima(
     y_train: pd.Series,
     seasonal_periods: list[int],
+    exog_train: pd.DataFrame | None = None,
 ) -> tuple[object, tuple[int, int, int], tuple[int, int, int, int]]:
     best_result = None
     best_spec = None
@@ -197,6 +225,7 @@ def _fit_best_sarima(
                     warnings.filterwarnings("ignore", category=FutureWarning)
                     model = ARIMA(
                         endog=y_train,
+                        exog=exog_train,
                         order=order,
                         seasonal_order=seasonal_order,
                         trend="c",
@@ -257,6 +286,35 @@ def _safe_ljungbox_pvalue(residuals: pd.Series, lag: int = 10) -> float | None:
         return float(out["lb_pvalue"].iloc[-1])
     except Exception:
         return None
+
+
+def _detect_changepoints(values: pd.Series, times: pd.Series, penalty: float) -> list[float]:
+    if rpt is None or len(values) < 10:
+        return []
+    signal = np.asarray(values, dtype=float).reshape(-1, 1)
+    try:
+        breakpoints = rpt.Pelt(model="rbf").fit_predict(signal, pen=penalty)
+    except Exception:
+        return []
+
+    clean_times = pd.Series(times).reset_index(drop=True)
+    changepoints: list[float] = []
+    for breakpoint in breakpoints[:-1]:
+        if 0 < breakpoint <= len(clean_times):
+            changepoints.append(float(clean_times.iloc[breakpoint - 1]))
+    return changepoints
+
+
+def _flag_residual_anomalies(
+    residuals: pd.Series,
+    *,
+    rolling_window: int = 12,
+    z_threshold: float = 2.5,
+) -> pd.Series:
+    series = pd.Series(residuals, dtype=float)
+    rolling_std = series.abs().rolling(window=rolling_window, min_periods=max(3, rolling_window // 2)).std()
+    rolling_std = rolling_std.replace(0.0, np.nan)
+    return (series.abs() > (z_threshold * rolling_std)).fillna(False)
 
 
 def _safe_series_filename(series_id: str) -> str:
@@ -323,6 +381,8 @@ def fit_sarima_models(
     min_total_obs: int = 36,
     min_test_obs: int = 12,
     test_fraction: float = 0.2,
+    changepoint_penalty: float = 10.0,
+    residual_z_threshold: float = 2.5,
 ) -> tuple[pd.DataFrame, list[FitArtifacts]]:
     output_dir.mkdir(parents=True, exist_ok=True)
     predictions_dir = output_dir / "predictions"
@@ -339,6 +399,7 @@ def fit_sarima_models(
         cadence_series = group[prepared.time_col].diff().dropna()
         cadence_s = float(cadence_series.median()) if not cadence_series.empty else 0.0
         ictal_window_rate = float(group["y"].fillna(0).mean()) if "y" in group.columns else None
+        exog_cols = tuple(col for col in prepared.exogenous_cols if col in group.columns)
 
         if len(group) < min_total_obs:
             metrics.append(
@@ -350,6 +411,7 @@ def fit_sarima_models(
                     cadence_s=cadence_s,
                     target_col=prepared.target_col,
                     ictal_window_rate=ictal_window_rate,
+                    exogenous_cols=exog_cols,
                     candidate_orders=candidate_orders,
                     candidate_seasonal_periods_steps=[],
                     selected_order=(0, 0, 0),
@@ -367,6 +429,9 @@ def fit_sarima_models(
                     smape_test_pct=None,
                     r2_test=None,
                     ljungbox_pvalue_train_residual=None,
+                    changepoints_train=[],
+                    changepoints_test=[],
+                    anomaly_count_test=0,
                     status="skipped",
                     notes=f"Series shorter than {min_total_obs} observations.",
                 )
@@ -384,6 +449,7 @@ def fit_sarima_models(
                     cadence_s=cadence_s,
                     target_col=prepared.target_col,
                     ictal_window_rate=ictal_window_rate,
+                    exogenous_cols=exog_cols,
                     candidate_orders=candidate_orders,
                     candidate_seasonal_periods_steps=[],
                     selected_order=(0, 0, 0),
@@ -401,6 +467,9 @@ def fit_sarima_models(
                     smape_test_pct=None,
                     r2_test=None,
                     ljungbox_pvalue_train_residual=None,
+                    changepoints_train=[],
+                    changepoints_test=[],
+                    anomaly_count_test=0,
                     status="skipped",
                     notes="Could not form a stable chronological train/test split.",
                 )
@@ -409,23 +478,36 @@ def fit_sarima_models(
 
         y_train = pd.to_numeric(train_df[prepared.target_col], errors="coerce")
         y_test = pd.to_numeric(test_df[prepared.target_col], errors="coerce")
+        exog_train = train_df[list(exog_cols)].astype(float) if exog_cols else None
+        exog_test = test_df[list(exog_cols)].astype(float) if exog_cols else None
         seasonal_periods = _infer_seasonal_periods(len(train_df))
 
-        result, best_order, best_seasonal_order = _fit_best_sarima(y_train, seasonal_periods)
+        result, best_order, best_seasonal_order = _fit_best_sarima(y_train, seasonal_periods, exog_train=exog_train)
         train_fitted = pd.Series(result.predict(start=0, end=len(train_df) - 1), index=train_df.index)
-        test_forecast = pd.Series(result.forecast(steps=len(test_df)), index=test_df.index)
+        test_forecast = pd.Series(result.forecast(steps=len(test_df), exog=exog_test), index=test_df.index)
         train_residual = y_train - train_fitted
         test_residual = y_test - test_forecast
+        train_changepoints = _detect_changepoints(train_residual, train_df[prepared.time_col], changepoint_penalty)
+        test_changepoints = _detect_changepoints(test_residual, test_df[prepared.time_col], changepoint_penalty)
+        test_anomaly_mask = _flag_residual_anomalies(test_residual, z_threshold=residual_z_threshold)
 
         train_pred_df = train_df[[prepared.series_col, prepared.time_col, prepared.target_col]].copy()
         train_pred_df["split"] = "train"
         train_pred_df["sarima_pred"] = train_fitted
         train_pred_df["sarima_residual"] = train_residual
+        train_pred_df["changepoint"] = train_pred_df[prepared.time_col].isin(train_changepoints)
+        train_pred_df["anomaly"] = False
 
         test_pred_df = test_df[[prepared.series_col, prepared.time_col, prepared.target_col]].copy()
         test_pred_df["split"] = "test"
         test_pred_df["sarima_pred"] = test_forecast
         test_pred_df["sarima_residual"] = test_residual
+        test_pred_df["changepoint"] = test_pred_df[prepared.time_col].isin(test_changepoints)
+        test_pred_df["anomaly"] = test_anomaly_mask.values
+
+        if exog_cols:
+            train_pred_df = train_pred_df.join(train_df[list(exog_cols)].reset_index(drop=True))
+            test_pred_df = test_pred_df.join(test_df[list(exog_cols)].reset_index(drop=True))
 
         pred_df = pd.concat([train_pred_df, test_pred_df], ignore_index=True)
         if "y" in group.columns:
@@ -458,6 +540,7 @@ def fit_sarima_models(
                 cadence_s=cadence_s,
                 target_col=prepared.target_col,
                 ictal_window_rate=ictal_window_rate,
+                exogenous_cols=exog_cols,
                 candidate_orders=candidate_orders,
                 candidate_seasonal_periods_steps=seasonal_periods,
                 selected_order=best_order,
@@ -477,8 +560,14 @@ def fit_sarima_models(
                 smape_test_pct=_smape_pct(y_test, test_forecast),
                 r2_test=_safe_r2(y_test, test_forecast),
                 ljungbox_pvalue_train_residual=_safe_ljungbox_pvalue(train_residual),
+                changepoints_train=train_changepoints,
+                changepoints_test=test_changepoints,
+                anomaly_count_test=int(test_anomaly_mask.sum()),
                 status="ok",
-                notes="Pure SARIMA with chronological train/test split and out-of-sample forecast evaluation.",
+                notes=(
+                    "SARIMA/SARIMAX with chronological train/test split, residual changepoint detection, "
+                    "and anomaly flagging."
+                ),
             )
         )
 
@@ -494,13 +583,24 @@ def fit_sarima_models(
         json.dumps(
             {
                 "target_col": prepared.target_col,
+                "target_feature_name": prepared.target_feature_name,
                 "time_col": prepared.time_col,
                 "series_col": prepared.series_col,
+                "exogenous_cols": list(prepared.exogenous_cols),
                 "default_feature_sources": list(DEFAULT_FEATURE_SOURCES),
                 "candidate_orders": candidate_orders,
                 "candidate_seasonal_periods_base_steps": [4, 6, 12, 24],
-                "model_type": "SARIMA",
-                "uses_exog": False,
+                "model_type": "SARIMAX" if prepared.exogenous_cols else "SARIMA",
+                "uses_exog": bool(prepared.exogenous_cols),
+                "changepoint": {
+                    "method": "ruptures_pelt_rbf",
+                    "enabled": rpt is not None,
+                    "penalty": changepoint_penalty,
+                },
+                "anomaly_rule": {
+                    "z_threshold": residual_z_threshold,
+                    "signal": "test_residual_vs_rolling_std",
+                },
                 "evaluation": {
                     "scheme": "chronological_train_test_split",
                     "test_fraction": test_fraction,
@@ -523,9 +623,18 @@ def run_sarima_training(
     min_total_obs: int = 36,
     min_test_obs: int = 12,
     test_fraction: float = 0.2,
+    target_feature_name: str | None = None,
+    exogenous_cols: tuple[str, ...] = (),
+    changepoint_penalty: float = 10.0,
+    residual_z_threshold: float = 2.5,
 ) -> tuple[PreparedData, pd.DataFrame]:
     paths = paths or get_paths()
-    prepared = prepare_sarima_dataset(feature_path, paths=paths)
+    prepared = prepare_sarima_dataset(
+        feature_path,
+        paths=paths,
+        target_feature_name=target_feature_name,
+        exogenous_cols=exogenous_cols,
+    )
     output_dir = paths.outputs_dir / output_subdir
     metrics_df, _ = fit_sarima_models(
         prepared,
@@ -533,6 +642,8 @@ def run_sarima_training(
         min_total_obs=min_total_obs,
         min_test_obs=min_test_obs,
         test_fraction=test_fraction,
+        changepoint_penalty=changepoint_penalty,
+        residual_z_threshold=residual_z_threshold,
     )
     return prepared, metrics_df
 
@@ -548,6 +659,15 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--min-total-obs", type=int, default=36, help="Skip series shorter than this number of observations.")
     parser.add_argument("--min-test-obs", type=int, default=12, help="Minimum number of observations reserved for test.")
     parser.add_argument("--test-fraction", type=float, default=0.2, help="Chronological hold-out fraction for test.")
+    parser.add_argument("--target-feature", default=None, help="Optional column name to use as the scalar SARIMA target.")
+    parser.add_argument(
+        "--exog",
+        nargs="*",
+        default=(),
+        help="Optional exogenous columns already present in the SARIMA CSV, e.g. agg_std_rms y_lagged.",
+    )
+    parser.add_argument("--changepoint-penalty", type=float, default=10.0)
+    parser.add_argument("--residual-z-threshold", type=float, default=2.5)
     return parser
 
 
@@ -561,6 +681,10 @@ def main(argv: list[str] | None = None) -> int:
         min_total_obs=args.min_total_obs,
         min_test_obs=args.min_test_obs,
         test_fraction=args.test_fraction,
+        target_feature_name=args.target_feature,
+        exogenous_cols=tuple(args.exog),
+        changepoint_penalty=args.changepoint_penalty,
+        residual_z_threshold=args.residual_z_threshold,
     )
     output_dir = paths.outputs_dir / args.output_subdir
     ok_df = metrics_df[metrics_df["status"] == "ok"].copy()

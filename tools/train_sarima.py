@@ -11,6 +11,7 @@ src_dir = (ws / "src" if (ws / "src").exists() else ws.parent / "src").resolve()
 sys.path.insert(0, str(src_dir))
 
 from ds003029_eda.paths import get_paths
+from ds003029_eda.paths import resolve_workspace_root
 from ds003029_eda.sarima_training import run_sarima_training
 from ds003029_eda.window_features_multirun import WindowingConfig, build_multirun_window_features
 
@@ -27,10 +28,20 @@ def build_parser() -> argparse.ArgumentParser:
         )
     )
     parser.add_argument("--features", default=None, help="Optional feature file path.")
+    parser.add_argument("--workspace-root", default=None)
     parser.add_argument("--output-subdir", default="sarima_training", help="Output subdirectory inside eda_outputs/.")
     parser.add_argument("--min-total-obs", type=int, default=36, help="Skip series shorter than this number of observations.")
     parser.add_argument("--min-test-obs", type=int, default=12, help="Minimum number of observations reserved for test.")
     parser.add_argument("--test-fraction", type=float, default=0.2, help="Chronological hold-out fraction for test.")
+    parser.add_argument("--target-feature", default=None, help="Optional target feature column in the SARIMA CSV.")
+    parser.add_argument(
+        "--exog",
+        nargs="*",
+        default=(),
+        help="Optional exogenous columns already present in the SARIMA CSV, e.g. agg_std_rms y_lagged.",
+    )
+    parser.add_argument("--changepoint-penalty", type=float, default=10.0)
+    parser.add_argument("--residual-z-threshold", type=float, default=2.5)
     parser.add_argument(
         "--build-multirun-features",
         action="store_true",
@@ -44,7 +55,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = build_parser().parse_args()
-    paths = get_paths()
+    paths = get_paths(resolve_workspace_root(args.workspace_root))
     feature_path = args.features
 
     if args.build_multirun_features:
@@ -67,6 +78,10 @@ def main() -> int:
         min_total_obs=args.min_total_obs,
         min_test_obs=args.min_test_obs,
         test_fraction=args.test_fraction,
+        target_feature_name=args.target_feature,
+        exogenous_cols=tuple(args.exog),
+        changepoint_penalty=args.changepoint_penalty,
+        residual_z_threshold=args.residual_z_threshold,
     )
     output_dir = paths.outputs_dir / args.output_subdir
     ok_df = metrics_df[metrics_df["status"] == "ok"].copy()

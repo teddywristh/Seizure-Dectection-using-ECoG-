@@ -73,6 +73,7 @@ def build_parser() -> argparse.ArgumentParser:
     add_common_arguments(sarima_parser)
     sarima_parser.add_argument("--output-subdir", default="sarima")
     sarima_parser.add_argument("--aggregate-feature-name", default="agg_mean_rms")
+    sarima_parser.add_argument("--exogenous-feature-names", nargs="*", default=())
 
     full_parser = subparsers.add_parser("full", help="Run preprocessing then feature generation end to end.")
     add_common_arguments(full_parser)
@@ -117,6 +118,7 @@ def _build_sarima_prep_config(args: argparse.Namespace) -> SarimaPrepConfig:
         artifact_subdir=args.artifact_subdir,
         output_subdir=args.output_subdir,
         aggregate_feature_name=args.aggregate_feature_name,
+        exogenous_feature_names=tuple(args.exogenous_feature_names),
         overwrite=args.overwrite,
     )
 

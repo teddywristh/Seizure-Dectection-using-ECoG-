@@ -17,6 +17,7 @@ Muc tieu workspace tren nhanh `bim`: giu pipeline BIDS -> marker QC -> window fe
 - `docs/WORKFLOW.md`
 - `docs/DATA_ACCESS.md`
 - `docs/SARIMA_TRAINING.md`
+- `docs/MODELING_DATA_QUICK_REFERENCE.md`
 
 ## Code organization
 - Shared logic lives in `src/ds003029_eda/`
