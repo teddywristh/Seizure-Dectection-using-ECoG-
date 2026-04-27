@@ -1,4 +1,6 @@
+import argparse
 import re
+import sys
 from collections import Counter
 from pathlib import Path
 from typing import Optional
@@ -6,9 +8,13 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
-DATASET_ROOT = Path('EEG') / 'ds003029'
-RUN_SUMMARY = Path('eda_outputs') / 'ds003029_run_summary.csv'
-OUT_DIR = Path('eda_outputs')
+REPO_ROOT = Path(__file__).resolve().parents[1]
+SRC_ROOT = REPO_ROOT / 'src'
+if str(SRC_ROOT) not in sys.path:
+    sys.path.insert(0, str(SRC_ROOT))
+
+from ds003029_eda.data.io import resolve_artifact_path
+from ds003029_eda.paths import get_paths, resolve_workspace_root
 
 # Same regex family used in eda_ds003029.ipynb
 # NOTE: Keep onset/offset patterns mutually exclusive where possible.
@@ -34,10 +40,11 @@ OFFSETS_RE = re.compile(
 )
 
 
-def load_events_paths() -> pd.DataFrame:
+def load_events_paths(paths) -> pd.DataFrame:
     """Return DataFrame with columns: base, events_tsv (path string)."""
-    if RUN_SUMMARY.exists():
-        rs = pd.read_csv(RUN_SUMMARY)
+    run_summary = paths.outputs_dir / 'ds003029_run_summary.csv'
+    if run_summary.exists():
+        rs = pd.read_csv(run_summary)
         if 'events_tsv' in rs.columns:
             out = rs[['base', 'events_tsv']].copy()
             out['events_tsv'] = out['events_tsv'].fillna('')
@@ -46,9 +53,9 @@ def load_events_paths() -> pd.DataFrame:
             return out
 
     # Fallback: discover all events.tsv under dataset
-    paths = sorted(DATASET_ROOT.rglob('*_events.tsv'))
+    discovered = sorted(paths.dataset_root.rglob('*_events.tsv'))
     rows = []
-    for p in paths:
+    for p in discovered:
         base = p.with_name(p.name.replace('_events.tsv', '_ieeg'))
         rows.append({'base': str(base), 'events_tsv': str(p)})
     return pd.DataFrame(rows)
@@ -61,19 +68,14 @@ def read_events(path: Path) -> Optional[pd.DataFrame]:
         return None
 
 
-def normalize_path(p: str) -> Path:
-    path = Path(p)
-    if path.exists():
-        return path
-    # Many paths in run_summary are workspace-relative already
-    alt = Path(p)
-    if alt.exists():
-        return alt
-    # Try interpreting as relative to workspace root
-    alt2 = Path.cwd() / p
-    if alt2.exists():
-        return alt2
-    return path
+def normalize_path(p: str, paths) -> Path:
+    return resolve_artifact_path(p, workspace=paths.workspace, outputs_dir=paths.outputs_dir)
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description='Analyze ds003029 event markers and export marker QC tables.')
+    parser.add_argument('--workspace-root', default=None)
+    return parser
 
 
 def extract_intervals(events_df: pd.DataFrame) -> dict:
@@ -153,9 +155,11 @@ def extract_intervals(events_df: pd.DataFrame) -> dict:
 
 
 def main() -> int:
-    OUT_DIR.mkdir(exist_ok=True)
+    args = build_parser().parse_args()
+    paths = get_paths(resolve_workspace_root(args.workspace_root))
+    paths.outputs_dir.mkdir(parents=True, exist_ok=True)
 
-    df_paths = load_events_paths()
+    df_paths = load_events_paths(paths)
     if len(df_paths) == 0:
         print('No events.tsv paths found.')
         return 0
@@ -169,7 +173,7 @@ def main() -> int:
     for _, r in df_paths.iterrows():
         base = str(r.get('base', ''))
         evs = str(r.get('events_tsv', ''))
-        evp = normalize_path(evs)
+        evp = normalize_path(evs, paths)
         if not evp.exists():
             per_run_rows.append(
                 {
@@ -262,11 +266,11 @@ def main() -> int:
         print('Has unpaired onset:', int(ok['has_unpaired_onset'].sum()))
         print('Has orphan offset:', int(ok['has_orphan_offset'].sum()))
 
-    out_by_run = OUT_DIR / 'ds003029_marker_qc_by_run.csv'
+    out_by_run = paths.outputs_dir / 'ds003029_marker_qc_by_run.csv'
     per_run.to_csv(out_by_run, index=False)
     print('Wrote:', out_by_run.resolve())
 
-    out_intervals = OUT_DIR / 'ds003029_seizure_intervals_by_run.csv'
+    out_intervals = paths.outputs_dir / 'ds003029_seizure_intervals_by_run.csv'
     pd.DataFrame(interval_rows).to_csv(out_intervals, index=False)
     print('Wrote:', out_intervals.resolve())
 
@@ -275,9 +279,9 @@ def main() -> int:
         items = c.most_common(topn)
         return pd.DataFrame(items, columns=['trial_type', 'count'])
 
-    out_on = OUT_DIR / 'ds003029_trial_type_onset_vocab.csv'
-    out_off = OUT_DIR / 'ds003029_trial_type_offset_vocab.csv'
-    out_all = OUT_DIR / 'ds003029_trial_type_vocab.csv'
+    out_on = paths.outputs_dir / 'ds003029_trial_type_onset_vocab.csv'
+    out_off = paths.outputs_dir / 'ds003029_trial_type_offset_vocab.csv'
+    out_all = paths.outputs_dir / 'ds003029_trial_type_vocab.csv'
 
     counter_to_df(onset_vocab).to_csv(out_on, index=False)
     counter_to_df(offset_vocab).to_csv(out_off, index=False)

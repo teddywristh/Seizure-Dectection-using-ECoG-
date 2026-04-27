@@ -5,24 +5,24 @@
 - [x] Change directory to repo root:
 
 ```powershell
-cd c:\Users\LENOVO\Downloads\eeg\Seizure-Dectection-using-ECoG-
+cd /path/to/Seizure-Dectection-using-ECoG-
 ```
 
 Validation result (2026-04-21):
-- Commands were executed from `c:\Users\LENOVO\Downloads\eeg\Seizure-Dectection-using-ECoG-`.
+- Commands were executed from `/path/to/Seizure-Dectection-using-ECoG-`.
 - Conda shell setup had to be repaired before the run. Fresh PowerShell sessions now resolve `conda`; the validation run used the `vitaldb_aki` environment Python directly for reliability.
 
 ## 1. Refresh metadata prerequisites
 - [x] Rebuild run summary:
 
 ```powershell
-conda run -n vitaldb_aki python tools/build_run_summary_ds003029.py --workspace-root c:/Users/LENOVO/Downloads/eeg
+conda run -n vitaldb_aki python tools/build_run_summary_ds003029.py --workspace-root /path/to/Seizure-Dectection-using-ECoG-
 ```
 
 - [x] Rebuild marker QC and seizure intervals:
 
 ```powershell
-conda run -n vitaldb_aki python tools/build_marker_qc_ds003029.py --workspace-root c:/Users/LENOVO/Downloads/eeg
+conda run -n vitaldb_aki python tools/build_marker_qc_ds003029.py --workspace-root /path/to/Seizure-Dectection-using-ECoG-
 ```
 
 - [x] Sanity check that these files exist:
@@ -33,7 +33,7 @@ conda run -n vitaldb_aki python tools/build_marker_qc_ds003029.py --workspace-ro
 Validation result (2026-04-21):
 - `build_run_summary_ds003029.py` completed with `106` runs and `847` event-vocabulary entries.
 - `build_marker_qc_ds003029.py` completed with `106` runs and `78` paired seizure intervals.
-- Verified the three metadata CSV outputs under `c:/Users/LENOVO/Downloads/eeg/eda_outputs/`.
+- Verified the three metadata CSV outputs under `/path/to/Seizure-Dectection-using-ECoG-/eda_outputs/`.
 
 ## 2. Optional test gate
 - [x] Run the core test suite before the full experiment:
@@ -50,7 +50,7 @@ Validation result (2026-04-21):
 - [x] Run preprocessing and QC:
 
 ```powershell
-conda run -n vitaldb_aki python tools/run_data_processing_v2.py preprocess --workspace-root c:/Users/LENOVO/Downloads/eeg --artifact-subdir data_processing_v2 --target-sfreq 256 --bandpass-low 0.5 --bandpass-high 120 --notch-harmonics 3 --reference-mode average
+conda run -n vitaldb_aki python tools/run_data_processing_v2.py preprocess --workspace-root /path/to/Seizure-Dectection-using-ECoG- --artifact-subdir data_processing_v2 --target-sfreq 256 --bandpass-low 0.5 --bandpass-high 120 --notch-harmonics 3 --reference-mode average
 ```
 
 - [x] Inspect outputs:
@@ -68,13 +68,13 @@ Validation result (2026-04-21):
 - Verified `preprocess_ok=True` for all `16` runs.
 - Verified `sfreq_out=256.0` for all `16` runs.
 - Verified `n_channels_good > 0` for all successful runs; observed range was `77` to `117` good channels.
-- Verified `preprocess_run_summary.csv`, `bad_channels.csv`, and `reports/qc_report.html` under `c:/Users/LENOVO/Downloads/eeg/eda_outputs/data_processing_v2/`.
+- Verified `preprocess_run_summary.csv`, `bad_channels.csv`, and `reports/qc_report.html` under `/path/to/Seizure-Dectection-using-ECoG-/eda_outputs/data_processing_v2/`.
 
 ## 4. Extract features and build LOSO folds
 - [x] Run feature extraction:
 
 ```powershell
-conda run -n vitaldb_aki python tools/run_data_processing_v2.py features --workspace-root c:/Users/LENOVO/Downloads/eeg --artifact-subdir data_processing_v2 --window-sec 2.0 --step-sec 0.5 --label-margin-sec 0.5 --fill-missing-after-scaling 0.0
+conda run -n vitaldb_aki python tools/run_data_processing_v2.py features --workspace-root /path/to/Seizure-Dectection-using-ECoG- --artifact-subdir data_processing_v2 --window-sec 2.0 --step-sec 0.5 --label-margin-sec 0.5 --fill-missing-after-scaling 0.0
 ```
 
 - [x] Inspect outputs:
@@ -94,7 +94,7 @@ conda run -n vitaldb_aki python tools/run_data_processing_v2.py features --works
 
 Validation result (2026-04-21):
 - Feature extraction completed for `16 / 16` runs.
-- Verified `run_feature_inventory.csv`, `label_distribution.csv`, `feature_stats.csv`, `class_separability.csv`, and `fold_manifest.json` under `c:/Users/LENOVO/Downloads/eeg/eda_outputs/data_processing_v2/`.
+- Verified `run_feature_inventory.csv`, `label_distribution.csv`, `feature_stats.csv`, `class_separability.csv`, and `fold_manifest.json` under `/path/to/Seizure-Dectection-using-ECoG-/eda_outputs/data_processing_v2/`.
 - Generated `8` current LOSO folds: `fold_01_jh101`, `fold_02_jh102`, `fold_03_jh103`, `fold_04_pt01`, `fold_05_pt13`, `fold_06_pt3`, `fold_07_pt7`, and `fold_08_ummc001`.
 - Verified every current fold contains `train_dataset.npz`, `test_dataset.npz`, `train_index.csv`, `test_index.csv`, `scalers.json`, and `manifest.json`.
 - Removed stale fold directories from earlier partial runs so `folds/` now matches `fold_manifest.json` exactly.
@@ -116,7 +116,7 @@ Validation result (2026-04-21):
 - [x] If you need a clean rerun after verifying prerequisites, use:
 
 ```powershell
-conda run -n vitaldb_aki python tools/run_data_processing_v2.py full --workspace-root c:/Users/LENOVO/Downloads/eeg --artifact-subdir data_processing_v2 --target-sfreq 256 --bandpass-low 0.5 --bandpass-high 120 --notch-harmonics 3 --reference-mode average --window-sec 2.0 --step-sec 0.5 --label-margin-sec 0.5 --fill-missing-after-scaling 0.0 --overwrite
+conda run -n vitaldb_aki python tools/run_data_processing_v2.py full --workspace-root /path/to/Seizure-Dectection-using-ECoG- --artifact-subdir data_processing_v2 --target-sfreq 256 --bandpass-low 0.5 --bandpass-high 120 --notch-harmonics 3 --reference-mode average --window-sec 2.0 --step-sec 0.5 --label-margin-sec 0.5 --fill-missing-after-scaling 0.0 --overwrite
 ```
 
 Validation result (2026-04-21):
@@ -131,4 +131,4 @@ Validation result (2026-04-21):
 Validation result (2026-04-21):
 - Verified the current `8` folds contain `train_dataset.npz` and `test_dataset.npz` ready for downstream ML or DL experiments.
 - Verified `train_index.csv` and `test_index.csv` exist for every current fold and retain subject/run/time mapping columns.
-- Verified `manifest_preprocess.json`, `manifest_features.json`, and `fold_manifest.json` are present under `c:/Users/LENOVO/Downloads/eeg/eda_outputs/data_processing_v2/`.
+- Verified `manifest_preprocess.json`, `manifest_features.json`, and `fold_manifest.json` are present under `/path/to/Seizure-Dectection-using-ECoG-/eda_outputs/data_processing_v2/`.

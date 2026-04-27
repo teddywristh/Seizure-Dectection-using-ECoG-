@@ -40,14 +40,14 @@ Boundary windows are retained in the SARIMA export because the chronological cad
 ### Build or refresh v2 artifacts
 
 ```powershell
-python tools/run_data_processing_v2.py preprocess --workspace-root C:/Users/LENOVO/Downloads/eeg --artifact-subdir data_processing_v2 --overwrite
-python tools/run_data_processing_v2.py features --workspace-root C:/Users/LENOVO/Downloads/eeg --artifact-subdir data_processing_v2 --overwrite
+python tools/run_data_processing_v2.py preprocess --workspace-root /path/to/Seizure-Dectection-using-ECoG- --artifact-subdir data_processing_v2 --overwrite
+python tools/run_data_processing_v2.py features --workspace-root /path/to/Seizure-Dectection-using-ECoG- --artifact-subdir data_processing_v2 --overwrite
 ```
 
 ### Export SARIMA-ready CSV
 
 ```powershell
-python tools/run_data_processing_v2.py sarima-prep --workspace-root C:/Users/LENOVO/Downloads/eeg --artifact-subdir data_processing_v2 --overwrite
+python tools/run_data_processing_v2.py sarima-prep --workspace-root /path/to/Seizure-Dectection-using-ECoG- --artifact-subdir data_processing_v2 --overwrite
 ```
 
 ### Train SARIMA from the v2 bridge output

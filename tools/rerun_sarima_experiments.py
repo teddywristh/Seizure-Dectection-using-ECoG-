@@ -6,7 +6,7 @@ metrics (Issue #2 fix). Results are saved in eda_outputs/experiments/timeseries/
 
 Usage (from repo root, Seizure-Dectection-using-ECoG- dir):
     conda run -n drug-tox-env python tools/rerun_sarima_experiments.py \\
-        --workspace-root /home/mluser/BRT-FDA/MinhQuang/timeseries
+        --workspace-root /path/to/Seizure-Dectection-using-ECoG-
 """
 from __future__ import annotations
 

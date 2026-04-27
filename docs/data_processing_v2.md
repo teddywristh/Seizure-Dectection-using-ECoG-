@@ -243,14 +243,14 @@ Validated on `fold_02_jh102/train_dataset.npz`:
 ### 7.1 Build preprocess and fold artifacts
 
 ```powershell
-python tools/run_data_processing_v2.py preprocess --workspace-root C:/Users/LENOVO/Downloads/eeg --artifact-subdir data_processing_v2 --overwrite
-python tools/run_data_processing_v2.py features --workspace-root C:/Users/LENOVO/Downloads/eeg --artifact-subdir data_processing_v2 --overwrite
+python tools/run_data_processing_v2.py preprocess --workspace-root /path/to/Seizure-Dectection-using-ECoG- --artifact-subdir data_processing_v2 --overwrite
+python tools/run_data_processing_v2.py features --workspace-root /path/to/Seizure-Dectection-using-ECoG- --artifact-subdir data_processing_v2 --overwrite
 ```
 
 ### 7.2 Export SARIMA-ready CSV from v2 outputs
 
 ```powershell
-python tools/run_data_processing_v2.py sarima-prep --workspace-root C:/Users/LENOVO/Downloads/eeg --artifact-subdir data_processing_v2 --overwrite
+python tools/run_data_processing_v2.py sarima-prep --workspace-root /path/to/Seizure-Dectection-using-ECoG- --artifact-subdir data_processing_v2 --overwrite
 ```
 
 ### 7.3 Classical ML example
@@ -296,7 +296,7 @@ from ds003029_eda.sarima_training import run_sarima_training
 prepared, metrics_df = run_sarima_training(
     feature_path="data_processing_v2/sarima/ds003029_sarima_v2_input.csv",
     output_subdir="sarima_v2_from_data_processing_v2",
-    paths=get_paths("C:/Users/LENOVO/Downloads/eeg"),
+    paths=get_paths("/path/to/Seizure-Dectection-using-ECoG-"),
 )
 ```
 
@@ -318,8 +318,8 @@ prepared, metrics_df = run_sarima_training(
 
 ## 10. Workspace root note
 
-The CLI accepts `--workspace-root`. In this workspace, the real dataset root is the outer folder:
+The CLI accepts `--workspace-root`. In the current layout, point it at the repo root itself:
 
-`C:/Users/LENOVO/Downloads/eeg`
+`/path/to/Seizure-Dectection-using-ECoG-`
 
-If you run commands from the nested repo folder, keep pointing `--workspace-root` to that outer workspace so the pipeline sees the real `.eeg` files and the shared `eda_outputs/` directory.
+Both `EEG/ds003029/` and `eda_outputs/` now resolve under that same root, so you no longer need to target an outer workspace folder.
