@@ -5,6 +5,8 @@ from pathlib import Path
 
 import pandas as pd
 
+from _workspace_cli import load_family_report_config
+
 
 AGGREGATE_COLUMNS = ("metric", "mean", "std", "min", "max")
 ML_DL_TABLE_COLUMNS = (
@@ -28,6 +30,8 @@ TIMESERIES_TABLE_COLUMNS = (
     "r2_test_mean",
     "anomaly_count_test_mean",
 )
+DEFAULT_REPORT_CONFIG = "configs/reports/family_reports.json"
+FAMILY_CHOICES = ("all", "ml", "dl", "timeseries")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -49,6 +53,8 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Optional direct path for generated summaries. Defaults to <experiments-root>/summary.",
     )
+    parser.add_argument("--family", choices=FAMILY_CHOICES, default="all")
+    parser.add_argument("--report-config", default=DEFAULT_REPORT_CONFIG)
     return parser
 
 
@@ -99,6 +105,9 @@ def _flatten_aggregate_metrics(*, model_name: str, metrics_frame: pd.DataFrame) 
 
 
 def _summarize_family_from_aggregates(*, family_name: str, family_dir: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
+    if not family_dir.exists():
+        return pd.DataFrame(), pd.DataFrame(columns=["family", "model", "metric", "mean", "std", "min", "max"])
+
     summary_rows: list[dict[str, object]] = []
     long_rows: list[pd.DataFrame] = []
 
@@ -130,6 +139,9 @@ def _mode_text(values: pd.Series) -> str:
 
 
 def _summarize_timeseries_family(timeseries_dir: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
+    if not timeseries_dir.exists():
+        return pd.DataFrame(), pd.DataFrame(columns=["family", "model", "metric", "mean", "std", "min", "max"])
+
     summary_rows: list[dict[str, object]] = []
     long_rows: list[dict[str, object]] = []
 
@@ -227,10 +239,17 @@ def _pick_extreme(frame: pd.DataFrame, *, metric: str, ascending: bool) -> tuple
 def _build_summary_markdown(
     *,
     experiments_root: Path,
+    selected_families: list[str],
     ml_summary: pd.DataFrame,
     dl_summary: pd.DataFrame,
     timeseries_summary: pd.DataFrame,
+    generated_csv_files: list[str],
 ) -> str:
+    family_labels = {
+        "ml": "ML",
+        "dl": "DL",
+        "timeseries": "Timeseries",
+    }
     lines: list[str] = [
         "# Metrics Summary",
         "",
@@ -240,66 +259,82 @@ def _build_summary_markdown(
         "",
         "## Available outputs",
         "",
-        f"- ML: {', '.join(ml_summary['model'].tolist()) if not ml_summary.empty else 'none'}",
-        f"- DL: {', '.join(dl_summary['model'].tolist()) if not dl_summary.empty else 'none'}",
-        f"- Timeseries: {', '.join(timeseries_summary['model'].tolist()) if not timeseries_summary.empty else 'none'}",
-        "",
-        "## Machine learning",
-        "",
     ]
-    lines.extend(_markdown_table(ml_summary.sort_values("roc_auc_mean", ascending=False, kind="mergesort") if "roc_auc_mean" in ml_summary.columns else ml_summary, ML_DL_TABLE_COLUMNS))
 
-    ml_best_roc = _pick_extreme(ml_summary, metric="roc_auc_mean", ascending=False)
-    ml_best_f1 = _pick_extreme(ml_summary, metric="f1_mean", ascending=False)
-    if ml_best_roc or ml_best_f1:
-        lines.extend(["", "Quick read:"])
-        if ml_best_roc:
-            lines.append(f"- Best ROC AUC mean: `{ml_best_roc[0]}` ({_format_markdown_value(ml_best_roc[1])})")
-        if ml_best_f1:
-            lines.append(f"- Best F1 mean: `{ml_best_f1[0]}` ({_format_markdown_value(ml_best_f1[1])})")
-
-    lines.extend(["", "## Deep learning", ""])
-    lines.extend(_markdown_table(dl_summary.sort_values("roc_auc_mean", ascending=False, kind="mergesort") if "roc_auc_mean" in dl_summary.columns else dl_summary, ML_DL_TABLE_COLUMNS))
-
-    dl_best_roc = _pick_extreme(dl_summary, metric="roc_auc_mean", ascending=False)
-    dl_best_f1 = _pick_extreme(dl_summary, metric="f1_mean", ascending=False)
-    if dl_best_roc or dl_best_f1:
-        lines.extend(["", "Quick read:"])
-        if dl_best_roc:
-            lines.append(f"- Best ROC AUC mean: `{dl_best_roc[0]}` ({_format_markdown_value(dl_best_roc[1])})")
-        if dl_best_f1:
-            lines.append(f"- Best F1 mean: `{dl_best_f1[0]}` ({_format_markdown_value(dl_best_f1[1])})")
-
-    lines.extend(["", "## Timeseries", ""])
-    lines.extend(
-        _markdown_table(
-            timeseries_summary.sort_values("rmse_test_mean", ascending=True, kind="mergesort")
-            if "rmse_test_mean" in timeseries_summary.columns
-            else timeseries_summary,
-            TIMESERIES_TABLE_COLUMNS,
+    summary_lookup = {
+        "ml": ml_summary,
+        "dl": dl_summary,
+        "timeseries": timeseries_summary,
+    }
+    for family in selected_families:
+        family_summary = summary_lookup[family]
+        lines.append(
+            f"- {family_labels[family]}: {', '.join(family_summary['model'].tolist()) if not family_summary.empty else 'none'}"
         )
-    )
 
-    ts_best_rmse = _pick_extreme(timeseries_summary, metric="rmse_test_mean", ascending=True)
-    ts_best_smape = _pick_extreme(timeseries_summary, metric="smape_test_pct_mean", ascending=True)
-    if ts_best_rmse or ts_best_smape:
-        lines.extend(["", "Quick read:"])
-        if ts_best_rmse:
-            lines.append(f"- Lowest RMSE mean: `{ts_best_rmse[0]}` ({_format_markdown_value(ts_best_rmse[1])})")
-        if ts_best_smape:
-            lines.append(f"- Lowest sMAPE mean: `{ts_best_smape[0]}` ({_format_markdown_value(ts_best_smape[1])})")
+    if "ml" in selected_families:
+        lines.extend(["", "## Machine learning", ""])
+        lines.extend(
+            _markdown_table(
+                ml_summary.sort_values("roc_auc_mean", ascending=False, kind="mergesort")
+                if "roc_auc_mean" in ml_summary.columns
+                else ml_summary,
+                ML_DL_TABLE_COLUMNS,
+            )
+        )
 
-    lines.extend(
-        [
-            "",
-            "## Detailed files",
-            "",
-            "- `ml_metrics_summary.csv`: flattened summary of aggregated ML metrics by preset.",
-            "- `dl_metrics_summary.csv`: flattened summary of aggregated DL metrics by preset.",
-            "- `timeseries_metrics_summary.csv`: aggregated per-series metrics for each timeseries preset.",
-            "- `all_metrics_long.csv`: long-format table with `family`, `model`, `metric`, `mean`, `std`, `min`, and `max`.",
-        ]
-    )
+        ml_best_roc = _pick_extreme(ml_summary, metric="roc_auc_mean", ascending=False)
+        ml_best_f1 = _pick_extreme(ml_summary, metric="f1_mean", ascending=False)
+        if ml_best_roc or ml_best_f1:
+            lines.extend(["", "Quick read:"])
+            if ml_best_roc:
+                lines.append(f"- Best ROC AUC mean: `{ml_best_roc[0]}` ({_format_markdown_value(ml_best_roc[1])})")
+            if ml_best_f1:
+                lines.append(f"- Best F1 mean: `{ml_best_f1[0]}` ({_format_markdown_value(ml_best_f1[1])})")
+
+    if "dl" in selected_families:
+        lines.extend(["", "## Deep learning", ""])
+        lines.extend(
+            _markdown_table(
+                dl_summary.sort_values("roc_auc_mean", ascending=False, kind="mergesort")
+                if "roc_auc_mean" in dl_summary.columns
+                else dl_summary,
+                ML_DL_TABLE_COLUMNS,
+            )
+        )
+
+        dl_best_roc = _pick_extreme(dl_summary, metric="roc_auc_mean", ascending=False)
+        dl_best_f1 = _pick_extreme(dl_summary, metric="f1_mean", ascending=False)
+        if dl_best_roc or dl_best_f1:
+            lines.extend(["", "Quick read:"])
+            if dl_best_roc:
+                lines.append(f"- Best ROC AUC mean: `{dl_best_roc[0]}` ({_format_markdown_value(dl_best_roc[1])})")
+            if dl_best_f1:
+                lines.append(f"- Best F1 mean: `{dl_best_f1[0]}` ({_format_markdown_value(dl_best_f1[1])})")
+
+    if "timeseries" in selected_families:
+        lines.extend(["", "## Timeseries", ""])
+        lines.extend(
+            _markdown_table(
+                timeseries_summary.sort_values("rmse_test_mean", ascending=True, kind="mergesort")
+                if "rmse_test_mean" in timeseries_summary.columns
+                else timeseries_summary,
+                TIMESERIES_TABLE_COLUMNS,
+            )
+        )
+
+        ts_best_rmse = _pick_extreme(timeseries_summary, metric="rmse_test_mean", ascending=True)
+        ts_best_smape = _pick_extreme(timeseries_summary, metric="smape_test_pct_mean", ascending=True)
+        if ts_best_rmse or ts_best_smape:
+            lines.extend(["", "Quick read:"])
+            if ts_best_rmse:
+                lines.append(f"- Lowest RMSE mean: `{ts_best_rmse[0]}` ({_format_markdown_value(ts_best_rmse[1])})")
+            if ts_best_smape:
+                lines.append(f"- Lowest sMAPE mean: `{ts_best_smape[0]}` ({_format_markdown_value(ts_best_smape[1])})")
+
+    lines.extend(["", "## Detailed files", ""])
+    for file_name in generated_csv_files:
+        lines.append(f"- `{file_name}`")
 
     return "\n".join(lines) + "\n"
 
@@ -313,46 +348,74 @@ def main() -> int:
     output_dir = Path(args.output_dir).resolve() if args.output_dir is not None else experiments_root / "summary"
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    ml_summary, ml_long = _summarize_family_from_aggregates(
-        family_name="ml",
-        family_dir=experiments_root / "ml",
-    )
-    dl_summary, dl_long = _summarize_family_from_aggregates(
-        family_name="dl",
-        family_dir=experiments_root / "dl",
-    )
-    timeseries_summary, timeseries_long = _summarize_timeseries_family(experiments_root / "timeseries")
+    _resolved_report_config, family_order, family_specs, all_spec = load_family_report_config(args.report_config)
+    selected_families = list(family_order) if args.family == "all" else [args.family]
 
-    all_metrics_long = pd.concat([ml_long, dl_long, timeseries_long], ignore_index=True)
+    family_summaries: dict[str, pd.DataFrame] = {
+        "ml": pd.DataFrame(),
+        "dl": pd.DataFrame(),
+        "timeseries": pd.DataFrame(),
+    }
+    family_longs: dict[str, pd.DataFrame] = {
+        family: pd.DataFrame(columns=["family", "model", "metric", "mean", "std", "min", "max"])
+        for family in ("ml", "dl", "timeseries")
+    }
+
+    for family in selected_families:
+        if family == "timeseries":
+            summary_frame, long_frame = _summarize_timeseries_family(experiments_root / family)
+        else:
+            summary_frame, long_frame = _summarize_family_from_aggregates(
+                family_name=family,
+                family_dir=experiments_root / family,
+            )
+        family_summaries[family] = summary_frame
+        family_longs[family] = long_frame
+
+    long_frames = [family_longs[family] for family in selected_families if not family_longs[family].empty]
+    all_metrics_long = pd.concat(long_frames, ignore_index=True) if long_frames else pd.DataFrame(
+        columns=["family", "model", "metric", "mean", "std", "min", "max"]
+    )
     if not all_metrics_long.empty:
         all_metrics_long = all_metrics_long.sort_values(["family", "model", "metric"], kind="mergesort")
 
-    ml_summary.to_csv(output_dir / "ml_metrics_summary.csv", index=False)
-    dl_summary.to_csv(output_dir / "dl_metrics_summary.csv", index=False)
-    timeseries_summary.to_csv(output_dir / "timeseries_metrics_summary.csv", index=False)
-    all_metrics_long.to_csv(output_dir / "all_metrics_long.csv", index=False)
+    generated_csv_files: list[str] = []
+    for family in selected_families:
+        summary_file = str(family_specs[family]["summary_file"])
+        family_summaries[family].to_csv(output_dir / summary_file, index=False)
+        generated_csv_files.append(summary_file)
+
+    long_file_name = (
+        str(all_spec["summary_long_file"])
+        if args.family == "all"
+        else str(family_specs[args.family]["long_file"])
+    )
+    all_metrics_long.to_csv(output_dir / long_file_name, index=False)
+    generated_csv_files.append(long_file_name)
+
+    markdown_file_name = (
+        str(all_spec["summary_markdown"])
+        if args.family == "all"
+        else str(family_specs[args.family]["summary_markdown"])
+    )
 
     markdown_summary = _build_summary_markdown(
         experiments_root=experiments_root,
-        ml_summary=ml_summary,
-        dl_summary=dl_summary,
-        timeseries_summary=timeseries_summary,
+        selected_families=selected_families,
+        ml_summary=family_summaries["ml"],
+        dl_summary=family_summaries["dl"],
+        timeseries_summary=family_summaries["timeseries"],
+        generated_csv_files=generated_csv_files,
     )
-    (output_dir / "metrics_summary.md").write_text(markdown_summary, encoding="utf-8")
+    (output_dir / markdown_file_name).write_text(markdown_summary, encoding="utf-8")
 
     print(f"Experiments root: {experiments_root.as_posix()}")
+    print(f"Family scope: {', '.join(selected_families)}")
     print(f"Summary output: {output_dir.as_posix()}")
-    print(f"ML presets summarized: {len(ml_summary)}")
-    print(f"DL presets summarized: {len(dl_summary)}")
-    print(f"Timeseries presets summarized: {len(timeseries_summary)}")
+    for family in selected_families:
+        print(f"{family} presets summarized: {len(family_summaries[family])}")
     print("Generated files:")
-    for file_name in (
-        "ml_metrics_summary.csv",
-        "dl_metrics_summary.csv",
-        "timeseries_metrics_summary.csv",
-        "all_metrics_long.csv",
-        "metrics_summary.md",
-    ):
+    for file_name in [*generated_csv_files, markdown_file_name]:
         print(f"- {(output_dir / file_name).as_posix()}")
     return 0
 

@@ -134,3 +134,53 @@ def test_run_sarima_prep_supports_alternate_target_and_exog(tmp_path) -> None:
     assert combined_df["y_lagged"].tolist() == [0.0, 0.0, 1.0]
     assert combined_df["target_feature"].iloc[0] == "agg_mean_gamma_high_power"
     assert manifest_df.loc[0, "target_feature"] == "agg_mean_gamma_high_power"
+
+
+def test_run_sarima_prep_resolves_portable_and_windows_inventory_paths(tmp_path) -> None:
+    artifact_root = tmp_path / "eda_outputs" / "data_processing_v2"
+    runs_root = artifact_root / "features" / "runs"
+    runs_root.mkdir(parents=True)
+
+    tensor_path = runs_root / "sub-demo_run-03_window_tensor.npz"
+    np.savez(
+        tensor_path,
+        x_agg=np.array([[11.0], [12.0]], dtype=float),
+        aggregate_feature_names=np.array(["agg_mean_rms"], dtype="U32"),
+    )
+
+    index_path = runs_root / "sub-demo_run-03_window_index.csv"
+    pd.DataFrame(
+        {
+            "base": [str(tmp_path / "EEG" / "demo" / "sub-demo_run-03_ieeg")] * 2,
+            "subject": ["demo"] * 2,
+            "window_id": [0, 1],
+            "t_start_s": [0.0, 0.5],
+            "t_stop_s": [2.0, 2.5],
+            "t_mid_s": [1.0, 1.5],
+            "y": [0, 1],
+        }
+    ).to_csv(index_path, index=False)
+
+    pd.DataFrame(
+        [
+            {
+                "subject": "demo",
+                "base": str(tmp_path / "EEG" / "demo" / "sub-demo_run-03_ieeg"),
+                "tensor_path": "features/runs/sub-demo_run-03_window_tensor.npz",
+                "index_path": "C:\\Users\\LENOVO\\Downloads\\eeg\\eda_outputs\\data_processing_v2\\features\\runs\\sub-demo_run-03_window_index.csv",
+                "feature_ok": True,
+            }
+        ]
+    ).to_csv(artifact_root / "run_feature_inventory.csv", index=False)
+
+    paths = WorkspacePaths(
+        workspace=tmp_path,
+        dataset_root=tmp_path / "EEG" / "ds003029",
+        outputs_dir=tmp_path / "eda_outputs",
+    )
+    combined_df, manifest_df, output_root = run_sarima_prep(paths=paths, config=SarimaPrepConfig())
+
+    assert combined_df["rms"].tolist() == [11.0, 12.0]
+    assert combined_df["series_id"].tolist() == ["sub-demo_run-03_ieeg", "sub-demo_run-03_ieeg"]
+    assert manifest_df.loc[0, "n_windows"] == 2
+    assert (output_root / COMBINED_OUTPUT_NAME).exists()

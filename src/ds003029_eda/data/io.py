@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 import pandas as pd
@@ -44,6 +44,46 @@ def resolve_existing_path(path_str: str, workspace: Path | None = None) -> Path:
     if alt.exists():
         return alt
     return path
+
+
+def resolve_artifact_path(
+    path_str: str | Path,
+    *,
+    workspace: Path | None = None,
+    outputs_dir: Path | None = None,
+    artifact_root: Path | None = None,
+) -> Path:
+    candidate = resolve_existing_path(str(path_str), workspace=workspace)
+    if candidate.exists():
+        return candidate
+
+    normalized = str(path_str).replace("\\", "/")
+
+    if outputs_dir is not None and "eda_outputs/" in normalized:
+        suffix = normalized.split("eda_outputs/", 1)[1]
+        remapped = outputs_dir / Path(*PurePosixPath(suffix).parts)
+        if remapped.exists():
+            return remapped
+
+    if artifact_root is not None:
+        artifact_name_marker = f"{artifact_root.name}/"
+        if artifact_name_marker in normalized:
+            suffix = normalized.split(artifact_name_marker, 1)[1]
+            remapped = artifact_root / Path(*PurePosixPath(suffix).parts)
+            if remapped.exists():
+                return remapped
+
+        relative_candidate = artifact_root / Path(*PurePosixPath(normalized.lstrip("./")).parts)
+        if relative_candidate.exists():
+            return relative_candidate
+
+        file_name = Path(*PurePosixPath(normalized).parts).name
+        if file_name:
+            matches = list(artifact_root.rglob(file_name))
+            if len(matches) == 1:
+                return matches[0]
+
+    return candidate
 
 
 def read_run_inventory(

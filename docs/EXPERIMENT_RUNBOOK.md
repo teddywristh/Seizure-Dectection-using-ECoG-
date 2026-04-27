@@ -29,113 +29,143 @@ python -c "import torch; print(torch.cuda.is_available(), torch.version.cuda, to
 
 If you do not want to activate the environment in your current shell, prepend commands with `conda run -n ecog`.
 
-## 1. Timeseries
+On Linux, check `python --version` before running scripts. Some systems still map `python` to Python 2.
+If that happens, use `python3` (or your conda env python) for all commands in this runbook.
 
-The timeseries runner rebuilds a SARIMA-ready CSV from v2 tensors, then trains SARIMA/SARIMAX with changepoint and anomaly outputs.
+## Recommended staged workflow
 
-```bash
-python tools/run_timeseries_experiments.py \
-  --workspace-root C:/Users/LENOVO/Downloads/eeg \
-  --config configs/experiments/timeseries_models.json \
-  --preset sarima_rms
+The canonical run path is now split into four task groups. This keeps the workspace structure unchanged, but avoids the old "run everything at once" entrypoint.
 
-python tools/run_timeseries_experiments.py \
-  --workspace-root C:/Users/LENOVO/Downloads/eeg \
-  --config configs/experiments/timeseries_models.json \
-  --preset sarimax_rms_std
+## Task 1 - content and metadata
 
-python tools/run_timeseries_experiments.py \
-  --workspace-root C:/Users/LENOVO/Downloads/eeg \
-  --config configs/experiments/timeseries_models.json \
-  --preset sarimax_gamma
-
-python tools/run_timeseries_experiments.py \
-  --workspace-root C:/Users/LENOVO/Downloads/eeg \
-  --config configs/experiments/timeseries_models.json \
-  --preset sarimax_hjorth
-```
-
-Outputs are written under `eda_outputs/experiments/timeseries/<experiment_name>/`.
-
-## 2. Machine Learning
-
-The ML runner consumes `x_agg` from LOSO folds, saves fold-level checkpoints, predictions, SHAP reports when available, and aggregate metrics.
+Refresh run summary, marker QC, seizure intervals, and export the current 16-run manifests.
 
 ```bash
-python tools/run_ml_experiments.py \
-  --workspace-root C:/Users/LENOVO/Downloads/eeg \
-  --config configs/experiments/ml_models.json \
-  --preset xgboost_optuna
-
-python tools/run_ml_experiments.py \
-  --workspace-root C:/Users/LENOVO/Downloads/eeg \
-  --config configs/experiments/ml_models.json \
-  --preset lightgbm_dart
-
-python tools/run_ml_experiments.py \
-  --workspace-root C:/Users/LENOVO/Downloads/eeg \
-  --config configs/experiments/ml_models.json \
-  --preset catboost
-
-python tools/run_ml_experiments.py \
-  --workspace-root C:/Users/LENOVO/Downloads/eeg \
-  --config configs/experiments/ml_models.json \
-  --preset stacking
-
-python tools/run_ml_experiments.py \
-  --workspace-root C:/Users/LENOVO/Downloads/eeg \
-  --config configs/experiments/ml_models.json \
-  --preset svm_rbf_rfe
+python tools/workspace_content.py --workspace-root /path/to/workspace
 ```
 
-Outputs are written under `eda_outputs/experiments/ml/<experiment_name>/`.
+Outputs:
+- `eda_outputs/ds003029_run_summary.csv`
+- `eda_outputs/ds003029_marker_qc_by_run.csv`
+- `eda_outputs/ds003029_seizure_intervals_by_run.csv`
+- `eda_outputs/ds003029_content_run_manifest.csv`
+- `eda_outputs/ds003029_model_ready_run_manifest.csv`
 
-## 3. Raw Tensor Export For DL
+## Task 2 - process data by modeling direction
 
-Raw-signal models can either use pre-exported `(N, C, T)` tensors or stream windows directly from cached `*_preproc_raw.fif` files.
-If disk is tight, skip this step and let the DL runner fall back to on-demand raw loading automatically.
+Timeseries processing:
 
 ```bash
-python tools/build_raw_folds.py \
-  --workspace-root C:/Users/LENOVO/Downloads/eeg \
-  --artifact-subdir data_processing_v2 \
-  --output-subdir raw_folds \
-  --output-dtype float16
+python tools/workspace_data.py timeseries --workspace-root /path/to/workspace
 ```
 
-Outputs are written under `eda_outputs/data_processing_v2/raw_folds/<fold_id>/`.
-The exporter is resume-safe by default: rerunning it will skip folds that already have both train/test raw `.npz` files unless you pass `--overwrite`.
-
-## 4. Deep Learning
-
-The DL runner saves a best checkpoint per fold, epoch history, fold predictions, and aggregate metrics.
-By default the DL presets auto-select CUDA when available, use mixed precision for faster GPU training, and fall back to on-demand raw loading when `raw_folds` is absent.
-
-### Raw-signal models
+ML processing:
 
 ```bash
-python tools/run_dl_experiments.py --workspace-root C:/Users/LENOVO/Downloads/eeg --config configs/experiments/dl_models.json --preset eegnet --device cuda
-python tools/run_dl_experiments.py --workspace-root C:/Users/LENOVO/Downloads/eeg --config configs/experiments/dl_models.json --preset eegwavenet --device cuda
-python tools/run_dl_experiments.py --workspace-root C:/Users/LENOVO/Downloads/eeg --config configs/experiments/dl_models.json --preset cnn_bilstm --device cuda
-python tools/run_dl_experiments.py --workspace-root C:/Users/LENOVO/Downloads/eeg --config configs/experiments/dl_models.json --preset bendr --device cuda
-python tools/run_dl_experiments.py --workspace-root C:/Users/LENOVO/Downloads/eeg --config configs/experiments/dl_models.json --preset reve --device cuda
-python tools/run_dl_experiments.py --workspace-root C:/Users/LENOVO/Downloads/eeg --config configs/experiments/dl_models.json --preset biseizurere --device cuda
+python tools/workspace_data.py ml --workspace-root /path/to/workspace
 ```
 
-If you want to force streaming from cached `.fif` instead of using `raw_folds`, add `--raw-loading-strategy on_demand`.
-
-### Feature-channel models
+DL processing:
 
 ```bash
-python tools/run_dl_experiments.py --workspace-root C:/Users/LENOVO/Downloads/eeg --config configs/experiments/dl_models.json --preset inresformer --device cuda
-python tools/run_dl_experiments.py --workspace-root C:/Users/LENOVO/Downloads/eeg --config configs/experiments/dl_models.json --preset gat_bilstm --device cuda
-python tools/run_dl_experiments.py --workspace-root C:/Users/LENOVO/Downloads/eeg --config configs/experiments/dl_models.json --preset ce_tss_transformer --device cuda
-python tools/run_dl_experiments.py --workspace-root C:/Users/LENOVO/Downloads/eeg --config configs/experiments/dl_models.json --preset dbconformer --device cuda
-python tools/run_dl_experiments.py --workspace-root C:/Users/LENOVO/Downloads/eeg --config configs/experiments/dl_models.json --preset graphs4mer --device cuda
-python tools/run_dl_experiments.py --workspace-root C:/Users/LENOVO/Downloads/eeg --config configs/experiments/dl_models.json --preset dcrnn --device cuda
+python tools/workspace_data.py dl --workspace-root /path/to/workspace
 ```
 
-Outputs are written under `eda_outputs/experiments/dl/<experiment_name>/`.
+What these wrappers do:
+- `timeseries`: preprocess -> features -> SARIMA-ready export
+- `ml`: preprocess -> features
+- `dl`: preprocess -> features -> raw fold export by default
+
+## Task 3 - run one preset at a time
+
+List canonical presets:
+
+```bash
+python tools/workspace_experiment.py timeseries --list-presets
+python tools/workspace_experiment.py ml --list-presets
+python tools/workspace_experiment.py dl --list-presets
+python tools/workspace_experiment.py all --list-presets
+```
+
+Behavior of the experiment wrapper:
+- `--list-presets` only lists presets. It does not launch training.
+- `--preset <name>` launches one preset only.
+- `all` launches every preset in grouped order `timeseries -> ml -> dl` using `configs/experiments/all_models.json`.
+- If a complete output already exists for that preset, the wrapper reuses the existing outputs and does not retrain.
+- If only partial outputs or checkpoints exist, the wrapper does not auto-resume. Use `--force-retrain` to retrain from scratch.
+
+Run one timeseries preset:
+
+```bash
+python tools/workspace_experiment.py timeseries --preset sarima_rms --workspace-root /path/to/workspace
+python tools/workspace_experiment.py timeseries --preset sarimax_rms_std --workspace-root /path/to/workspace
+python tools/workspace_experiment.py timeseries --preset sarimax_gamma --workspace-root /path/to/workspace
+python tools/workspace_experiment.py timeseries --preset sarimax_hjorth --workspace-root /path/to/workspace
+```
+
+Run one ML preset:
+
+```bash
+python tools/workspace_experiment.py ml --preset xgboost_optuna --workspace-root /path/to/workspace
+python tools/workspace_experiment.py ml --preset lightgbm_dart --workspace-root /path/to/workspace
+python tools/workspace_experiment.py ml --preset catboost --workspace-root /path/to/workspace
+python tools/workspace_experiment.py ml --preset stacking --workspace-root /path/to/workspace
+python tools/workspace_experiment.py ml --preset svm_rbf_rfe --workspace-root /path/to/workspace
+```
+
+Run one DL preset:
+
+```bash
+python tools/workspace_experiment.py dl --preset eegnet --workspace-root /path/to/workspace --device cuda
+python tools/workspace_experiment.py dl --preset eegwavenet --workspace-root /path/to/workspace --device cuda
+python tools/workspace_experiment.py dl --preset cnn_bilstm --workspace-root /path/to/workspace --device cuda
+python tools/workspace_experiment.py dl --preset bendr --workspace-root /path/to/workspace --device cuda
+python tools/workspace_experiment.py dl --preset reve --workspace-root /path/to/workspace --device cuda
+python tools/workspace_experiment.py dl --preset biseizurere --workspace-root /path/to/workspace --device cuda
+python tools/workspace_experiment.py dl --preset inresformer --workspace-root /path/to/workspace --device cuda
+python tools/workspace_experiment.py dl --preset gat_bilstm --workspace-root /path/to/workspace --device cuda
+python tools/workspace_experiment.py dl --preset ce_tss_transformer --workspace-root /path/to/workspace --device cuda
+python tools/workspace_experiment.py dl --preset dbconformer --workspace-root /path/to/workspace --device cuda
+python tools/workspace_experiment.py dl --preset graphs4mer --workspace-root /path/to/workspace --device cuda
+python tools/workspace_experiment.py dl --preset dcrnn --workspace-root /path/to/workspace --device cuda
+```
+
+If you want to force DL streaming from cached `.fif` instead of using `raw_folds`, add `--raw-loading-strategy on_demand`.
+
+## Task 4 - post-training reports
+
+Regenerate summaries:
+
+```bash
+python tools/workspace_reports.py summarize --family all --workspace-root /path/to/workspace
+python tools/workspace_reports.py summarize --family ml --workspace-root /path/to/workspace
+```
+
+Create metric plots:
+
+```bash
+python tools/workspace_reports.py plot --family all --workspace-root /path/to/workspace
+python tools/workspace_reports.py plot --family timeseries --workspace-root /path/to/workspace
+```
+
+Verify all current outputs:
+
+```bash
+python tools/workspace_reports.py verify --family all --workspace-root /path/to/workspace
+python tools/workspace_reports.py verify --family dl --workspace-root /path/to/workspace
+```
+
+Verification artifacts:
+- `eda_outputs/experiments/verification/verification_results.csv`
+- `eda_outputs/experiments/verification/verification_issues.csv`
+- `eda_outputs/experiments/verification/verification_summary.md`
+- `eda_outputs/experiments/verification/verification_summary_timeseries.md`
+- `eda_outputs/experiments/verification/verification_summary_ml.md`
+- `eda_outputs/experiments/verification/verification_summary_dl.md`
+
+## Legacy bulk runner
+
+`tools/run_workspace_pipeline.py` is still available for bulk reruns, but it is now legacy rather than the recommended daily workflow.
 
 ## Artifact Conventions
 

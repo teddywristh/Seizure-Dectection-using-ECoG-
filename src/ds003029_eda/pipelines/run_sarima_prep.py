@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict, dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import numpy as np
 import pandas as pd
@@ -11,8 +11,10 @@ if __package__ is None or __package__ == "":
     import sys
 
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    from ds003029_eda.data.io import resolve_artifact_path
     from ds003029_eda.paths import WorkspacePaths, get_paths
 else:
+    from ..data.io import resolve_artifact_path
     from ..paths import WorkspacePaths, get_paths
 
 
@@ -36,6 +38,11 @@ class SarimaPrepConfig:
 
 def _is_truthy(value: object) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "y"}
+
+
+def _series_id_from_base(base_value: object) -> str:
+    normalized = str(base_value).replace("\\", "/")
+    return PurePosixPath(normalized).name
 
 
 def _load_successful_inventory(artifact_root: Path) -> pd.DataFrame:
@@ -115,7 +122,7 @@ def build_sarima_run_frame(
         )
 
     frame = index_df.copy()
-    frame["series_id"] = frame["base"].astype(str).map(lambda value: Path(value).name)
+    frame["series_id"] = frame["base"].astype(str).map(_series_id_from_base)
     frame["rms"] = np.asarray(rms_series, dtype=float)
     frame["t_mid_s"] = pd.to_numeric(frame["t_mid_s"], errors="coerce")
     if "t_start_s" in frame.columns:
@@ -183,8 +190,18 @@ def run_sarima_prep(
     run_frames: list[pd.DataFrame] = []
     manifest_rows: list[dict[str, object]] = []
     for row in inventory.itertuples(index=False):
-        tensor_path = Path(row.tensor_path)
-        index_path = Path(row.index_path)
+        tensor_path = resolve_artifact_path(
+            row.tensor_path,
+            workspace=paths.workspace,
+            outputs_dir=paths.outputs_dir,
+            artifact_root=artifact_root,
+        )
+        index_path = resolve_artifact_path(
+            row.index_path,
+            workspace=paths.workspace,
+            outputs_dir=paths.outputs_dir,
+            artifact_root=artifact_root,
+        )
         index_df = pd.read_csv(index_path)
         rms_series = _load_rms_series(tensor_path, config.aggregate_feature_name)
         exogenous_matrix, exogenous_feature_names = _load_feature_matrix(

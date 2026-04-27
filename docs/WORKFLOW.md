@@ -1,36 +1,115 @@
-# Workflow - ds003029 on branch `bim`
+# Workflow - staged workspace execution
 
-## Big picture
-Pipeline hien tai co 4 lop:
-- Metadata-only: quet BIDS sidecars de lap inventory run, channels, events.
-- Marker QC: chuan hoa onset/offset va ghep seizure intervals.
-- Signal-level features: doc BrainVision bang MNE, cat window, trich `rms`, `ptp`, `line_length`, va label `y`.
-- Modeling: fit SARIMA thuan theo tung run tren chuoi `rms`.
+## Principle
 
-## Main execution order
-1. `notebooks/01_metadata_run_summary_ds003029.ipynb`
-   - Tao `ds003029_run_summary.csv` va `ds003029_event_vocab.csv`
-2. `notebooks/02_marker_qc_intervals_ds003029.ipynb`
-   - Tao `ds003029_marker_qc_by_run.csv` va `ds003029_seizure_intervals_by_run.csv`
-3. `notebooks/03_signal_eda_windows_features_ds003029.ipynb`
-   - Tao feature windows de train model
-4. `notebooks/04_sarima_training_ds003029.ipynb`
-   - Train SARIMA thuan tren tung run voi chronological train/test split
+Keep the current workspace layout, but run it in four task groups instead of one monolithic full-pipeline command.
 
-## Reusable code
-- `src/ds003029_eda/paths.py`: resolve workspace, dataset, output paths
-- `src/ds003029_eda/run_summary.py`: build metadata inventory
-- `src/ds003029_eda/markers.py`: parse onset/offset markers
-- `src/ds003029_eda/marker_qc.py`: build QC tables and seizure intervals
-- `src/ds003029_eda/window_features_multirun.py`: build multirun window features
-- `src/ds003029_eda/sarima_training.py`: train pure SARIMA without exogenous regressors
+After activating the conda environment, the canonical commands are all plain `python tools/...` calls.
 
-## Scripts
-- `tools/analyze_event_markers_ds003029.py`
-- `tools/build_window_features_multirun_full.py`
-- `tools/train_sarima.py`
-- `tools/validate_labels_ds003029.py`
+## Task 1 - content and metadata
 
-## Notes
-- Nhanh `bim` khong con giu workflow ARIMAX cu lam duong train chinh nua.
-- Neu can chay tu command line, xem `docs/SARIMA_TRAINING.md`.
+Refresh run metadata, rebuild seizure intervals, and export the current raw-content manifests.
+
+```bash
+python tools/workspace_content.py --workspace-root /path/to/workspace
+```
+
+What this produces:
+- `eda_outputs/ds003029_run_summary.csv`
+- `eda_outputs/ds003029_marker_qc_by_run.csv`
+- `eda_outputs/ds003029_seizure_intervals_by_run.csv`
+- `eda_outputs/ds003029_content_run_manifest.csv`
+- `eda_outputs/ds003029_model_ready_run_manifest.csv`
+
+Default behavior:
+- validates the current `16` raw-content runs
+- validates the current `16` model-ready runs
+
+## Task 2 - data processing by direction
+
+Run preprocessing separately for each modeling direction.
+
+Timeseries:
+
+```bash
+python tools/workspace_data.py timeseries --workspace-root /path/to/workspace
+```
+
+ML:
+
+```bash
+python tools/workspace_data.py ml --workspace-root /path/to/workspace
+```
+
+DL:
+
+```bash
+python tools/workspace_data.py dl --workspace-root /path/to/workspace
+```
+
+What each direction does:
+- `timeseries`: `preprocess` -> `features` -> `sarima-prep`
+- `ml`: `preprocess` -> `features`
+- `dl`: `preprocess` -> `features` -> `raw_folds` export by default
+
+## Task 3 - run one experiment preset at a time
+
+List presets first:
+
+```bash
+python tools/workspace_experiment.py timeseries --list-presets
+python tools/workspace_experiment.py ml --list-presets
+python tools/workspace_experiment.py dl --list-presets
+python tools/workspace_experiment.py all --list-presets
+```
+
+Run a single preset:
+
+```bash
+python tools/workspace_experiment.py timeseries --preset sarima_rms --workspace-root /path/to/workspace
+python tools/workspace_experiment.py ml --preset xgboost_optuna --workspace-root /path/to/workspace
+python tools/workspace_experiment.py dl --preset eegnet --workspace-root /path/to/workspace
+python tools/workspace_experiment.py all --workspace-root /path/to/workspace --force-retrain
+```
+
+This intentionally does not default to "run all presets".
+
+Run behavior:
+- `--list-presets` only prints preset names.
+- `--preset <name>` runs one preset only.
+- `all` runs every preset from the grouped config `configs/experiments/all_models.json` in family order `timeseries -> ml -> dl`.
+- If the preset already has a complete output directory, the wrapper reuses those results and exits without retraining.
+- If the preset directory is only partially populated, the wrapper stops. Use `--force-retrain` to retrain from scratch in that output directory.
+
+## Task 4 - post-training outputs
+
+Summaries:
+
+```bash
+python tools/workspace_reports.py summarize --family all --workspace-root /path/to/workspace
+python tools/workspace_reports.py summarize --family timeseries --workspace-root /path/to/workspace
+```
+
+Metric plots:
+
+```bash
+python tools/workspace_reports.py plot --family all --workspace-root /path/to/workspace
+python tools/workspace_reports.py plot --family ml --workspace-root /path/to/workspace
+```
+
+Verification:
+
+```bash
+python tools/workspace_reports.py verify --family all --workspace-root /path/to/workspace
+python tools/workspace_reports.py verify --family dl --workspace-root /path/to/workspace
+```
+
+Main outputs:
+- modeling outputs: `eda_outputs/experiments/{timeseries,ml,dl}/<experiment_name>/`
+- summaries: `eda_outputs/experiments/summary/`
+- plots: `eda_outputs/experiments/summary/plots/`
+- verification reports: `eda_outputs/experiments/verification/`
+
+## Legacy script
+
+`tools/run_workspace_pipeline.py` remains available for bulk reruns, but it is now a legacy convenience script rather than the recommended workflow.

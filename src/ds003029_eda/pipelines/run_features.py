@@ -8,7 +8,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from ..data.io import intervals_for_base, load_mne
+from ..data.io import intervals_for_base, load_mne, resolve_artifact_path
 from ..data.normalize import fit_array_scaler, save_scalers_json, transform_array
 from ..features.freq_domain import FREQUENCY_FEATURE_NAMES, compute_frequency_domain_features
 from ..features.time_domain import AGGREGATE_SUFFIXES, TIME_DOMAIN_FEATURE_NAMES, compute_time_domain_features
@@ -24,6 +24,13 @@ AGGREGATE_FEATURE_NAMES = tuple(
     + [f"agg_std_{feature_name}" for feature_name in CHANNEL_FEATURE_NAMES]
     + [f"agg_max_{feature_name}" for feature_name in CHANNEL_FEATURE_NAMES]
 )
+
+
+def _portable_artifact_path(path: Path, artifact_root: Path) -> str:
+    try:
+        return path.relative_to(artifact_root).as_posix()
+    except ValueError:
+        return path.as_posix()
 
 
 @dataclass(frozen=True)
@@ -174,7 +181,13 @@ def _binary_auc(scores: np.ndarray, labels: np.ndarray) -> float:
     return (sum_ranks_pos - (n_pos * (n_pos + 1) / 2.0)) / (n_pos * n_neg)
 
 
-def _build_feature_reports(run_inventory: pd.DataFrame, reports_dir: Path) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+def _build_feature_reports(
+    run_inventory: pd.DataFrame,
+    reports_dir: Path,
+    *,
+    artifact_root: Path,
+    paths: WorkspacePaths,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     label_distribution = (
         run_inventory.groupby("subject", as_index=False)
         .agg(
@@ -191,7 +204,13 @@ def _build_feature_reports(run_inventory: pd.DataFrame, reports_dir: Path) -> tu
     agg_blocks: list[np.ndarray] = []
     y_blocks: list[np.ndarray] = []
     for _, row in run_inventory.iterrows():
-        payload = np.load(row["tensor_path"], allow_pickle=True)
+        tensor_path = resolve_artifact_path(
+            row["tensor_path"],
+            workspace=paths.workspace,
+            outputs_dir=paths.outputs_dir,
+            artifact_root=artifact_root,
+        )
+        payload = np.load(tensor_path, allow_pickle=True)
         y = payload["y"].astype(np.int8)
         keep = y != -1
         agg_blocks.append(payload["x_agg"][keep].astype(np.float32))
@@ -308,8 +327,8 @@ def run_feature_pipeline(
                 {
                     "subject": subject,
                     "base": base,
-                    "tensor_path": str(tensor_path),
-                    "index_path": str(index_path),
+                    "tensor_path": _portable_artifact_path(tensor_path, artifact_root),
+                    "index_path": _portable_artifact_path(index_path, artifact_root),
                     "n_channels_used": int(len(channel_names)),
                     "n_windows": int(len(labels_df)),
                     "n_ictal": int(np.sum(y == 1)),
@@ -324,8 +343,8 @@ def run_feature_pipeline(
                 {
                     "subject": subject,
                     "base": base,
-                    "tensor_path": str(tensor_path),
-                    "index_path": str(index_path),
+                    "tensor_path": _portable_artifact_path(tensor_path, artifact_root),
+                    "index_path": _portable_artifact_path(index_path, artifact_root),
                     "n_channels_used": float("nan"),
                     "n_windows": 0,
                     "n_ictal": 0,
@@ -343,7 +362,12 @@ def run_feature_pipeline(
     if valid_runs.empty:
         raise RuntimeError("Feature extraction failed for every preprocessed run.")
 
-    label_distribution, feature_stats_df, separability_df = _build_feature_reports(valid_runs, reports_dir)
+    label_distribution, feature_stats_df, separability_df = _build_feature_reports(
+        valid_runs,
+        reports_dir,
+        artifact_root=artifact_root,
+        paths=paths,
+    )
 
     subject_table = build_subject_table(valid_runs.assign(n_intervals=1))
     folds = build_loso_folds(subject_table["subject"].astype(str).tolist())
@@ -367,8 +391,20 @@ def run_feature_pipeline(
             meta_frames: list[pd.DataFrame] = []
 
             for _, row in rows.iterrows():
-                payload = np.load(row["tensor_path"], allow_pickle=True)
-                index_df = pd.read_csv(row["index_path"])
+                tensor_path = resolve_artifact_path(
+                    row["tensor_path"],
+                    workspace=paths.workspace,
+                    outputs_dir=paths.outputs_dir,
+                    artifact_root=artifact_root,
+                )
+                index_path = resolve_artifact_path(
+                    row["index_path"],
+                    workspace=paths.workspace,
+                    outputs_dir=paths.outputs_dir,
+                    artifact_root=artifact_root,
+                )
+                payload = np.load(tensor_path, allow_pickle=True)
+                index_df = pd.read_csv(index_path)
                 y = payload["y"].astype(np.int8)
                 keep = y != -1
                 x_channel = payload["x_channel"][keep].astype(np.float32)
