@@ -139,6 +139,7 @@ Regenerate summaries:
 ```bash
 python tools/workspace_reports.py summarize --family all --workspace-root /path/to/workspace
 python tools/workspace_reports.py summarize --family ml --workspace-root /path/to/workspace
+python tools/workspace_reports.py cross_family_leaderboard --workspace-root /path/to/workspace
 ```
 
 Create metric plots:
@@ -172,8 +173,9 @@ Verification artifacts:
 - ML checkpoints: `eda_outputs/experiments/ml/<experiment_name>/checkpoints/*.joblib`
 - DL checkpoints: `eda_outputs/experiments/dl/<experiment_name>/checkpoints/*.pt`
 - Timeseries metrics: `eda_outputs/experiments/timeseries/<experiment_name>/series_metrics.csv`
+- Timeseries derived classification metrics: `eda_outputs/experiments/timeseries/<experiment_name>/sarima_classification_metrics.csv`
 - Per-fold predictions: `predictions/*.csv`
-- Aggregates: `aggregate_metrics.csv` or SARIMA metric exports
+- Aggregates: `aggregate_metrics.csv`, SARIMA metric exports, and `eda_outputs/experiments/summary/cross_family_leaderboard.csv`
 
 ## Notes
 

@@ -24,11 +24,11 @@ The repository is now self-contained: raw data lives under `EEG/ds003029/`, gene
 
 | Direction | Primary question | Main input artifact | Analysis unit | Split and evaluation | Best current result | Best use case |
 | --- | --- | --- | --- | --- | --- | --- |
-| **Timeseries** | Can a scalar signal derived from each run be forecast and flagged for anomalies over time? | `eda_outputs/data_processing_v2/sarima/ds003029_sarima_v2_input.csv` | One chronological window row within one run | Chronological train and test split inside each run | `sarimax_hjorth` has the lowest RMSE mean at `3.6159e-08`; `sarimax_rms_std` has the lowest sMAPE mean at `34.5963` | Run-level temporal baselines, residual analysis, anomaly-style inspection |
+| **Timeseries** | Can a scalar signal derived from each run be forecast and converted into residual-based anomaly classification scores? | `eda_outputs/data_processing_v2/sarima/ds003029_sarima_v2_input.csv` | One chronological window row within one run | Chronological train/test split inside each run, then residual-to-score bridge on test windows | Forecast track: `sarimax_hjorth` has the lowest RMSE mean at `3.6159e-08`; derived classification track: `sarimax_gamma` reaches ROC-AUC `0.8401`, AP `0.1804` | Run-level temporal baselines, residual diagnostics, anomaly-proxy seizure scoring |
 | **ML** | Can hand-crafted aggregate features classify seizure windows across held-out subjects? | `eda_outputs/data_processing_v2/folds/<fold_id>/{train,test}_dataset.npz` with `x_agg` | One labeled 2-second window with 48 aggregate features | Leave-one-subject-out folds plus grouped and stratified inner tuning | `catboost` reaches ROC-AUC `0.8799`, AP `0.8723`, F1 `0.6531` | Strongest current baseline on the curated subset |
 | **DL** | Can channel-feature tensors or raw signal windows learn seizure patterns directly? | Feature-channel folds from `folds/` and raw folds from `raw_folds/` | One labeled 2-second window as a tensor | Same leave-one-subject-out fold structure reused from ML | `ce_tss_transformer` reaches ROC-AUC `0.8591`, AP `0.7752`, F1 `0.6218` | Higher-capacity models when channel structure or raw signal structure matters |
 
-> **Important:** timeseries metrics such as RMSE, MAE, sMAPE, and $R^2$ do **not** measure the same task as ML and DL metrics such as ROC-AUC, average precision, and F1. Treat timeseries as a separate forecasting track, not as a directly comparable classifier leaderboard.
+> **Important:** the timeseries direction now reports two metric tracks: forecast metrics (RMSE/MAE/sMAPE/$R^2$) and **derived** classification metrics (ROC-AUC/AP/F1) computed from SARIMA residual scores. Those derived classifier metrics are useful for comparison context, but they remain methodologically asymmetric vs ML and DL because timeseries uses in-run chronological splits (not LOSO subject holdout), and threshold tuning is done on the same test segment.
 
 ---
 
@@ -49,13 +49,13 @@ The current workspace contains completed outputs for all three directions and pa
 
 | Direction | Leader | Key metrics | Interpretation |
 | --- | --- | --- | --- |
-| **Timeseries** | `sarimax_hjorth` and `sarimax_rms_std` | Lowest RMSE mean: `3.6159e-08`; lowest sMAPE mean: `34.5963` | Best read as a run-level forecasting baseline, not as a seizure classifier |
+| **Timeseries** | `sarimax_gamma` (derived classifier) and `sarimax_hjorth` (forecast) | Derived ROC-AUC `0.8401`, AP `0.1804` (`sarimax_gamma`); lowest RMSE mean `3.6159e-08` (`sarimax_hjorth`) | Useful as residual-anomaly context and temporal forecasting baseline; derived AP remains far below top ML and DL classifiers |
 | **ML** | `catboost` | ROC-AUC `0.8799`, AP `0.8723`, F1 `0.6531`, precision `0.7308`, sensitivity `0.7248`, specificity `0.8315`, accuracy `0.7620` | Strongest overall direction on the current curated subset |
 | **DL** | `ce_tss_transformer` | ROC-AUC `0.8591`, AP `0.7752`, F1 `0.6218`, precision `0.6534`, sensitivity `0.6976`, specificity `0.7957`, accuracy `0.7416` | Best deep-learning result, but still behind the top ML baseline |
 
 ### What stands out
 
-- **Timeseries** is useful for temporal reconstruction and anomaly-oriented summaries, but it is not the primary seizure classification winner in this workspace.
+- **Timeseries** gains a usable residual-derived ROC signal (`sarimax_gamma` ROC-AUC `0.8401`), but PRAUC remains low (`0.1804`), showing weak precision-recall behavior under class imbalance.
 - **ML** currently wins because the curated dataset is still small enough that strong hand-crafted features plus LOSO evaluation remain highly effective.
 - **DL** is competitive when the model can exploit channel structure, but weaker raw-signal adapters such as `bendr`, `biseizurere_proxy`, and `reve` show that not every architecture benefits equally from the current data scale.
 
@@ -63,6 +63,12 @@ The current workspace contains completed outputs for all three directions and pa
 
 ```bash
 python3 tools/workspace_reports.py summarize --family all --workspace-root /path/to/Seizure-Dectection-using-ECoG-
+```
+
+### One command for cross-family ROC/PRAUC leaderboard
+
+```bash
+python3 tools/workspace_reports.py cross_family_leaderboard --workspace-root /path/to/Seizure-Dectection-using-ECoG-
 ```
 
 ### One command for all result verification
@@ -273,7 +279,8 @@ python3 tools/workspace_experiment.py all --workspace-root /path/to/Seizure-Dect
 | --- | --- |
 | `run_workspace_pipeline.py` | You want an end-to-end rerun for the full workspace |
 | `workspace_experiment.py all` | You already trust the processed artifacts and only want to retrain the full experiment suite |
-| `workspace_reports.py summarize --family all` | You want a fresh cross-family leaderboard without retraining |
+| `workspace_reports.py summarize --family all` | You want refreshed per-family summary tables and markdown without retraining |
+| `workspace_reports.py cross_family_leaderboard` | You want one ROC/PRAUC ranking table across timeseries, ML, and DL |
 | `workspace_reports.py verify --family all` | You want to confirm all existing outputs are complete and consistent |
 
 ---
@@ -284,10 +291,10 @@ python3 tools/workspace_experiment.py all --workspace-root /path/to/Seizure-Dect
 | --- | --- | --- |
 | Metadata and manifests | `eda_outputs/` | Run summary, marker QC, seizure intervals, content manifests |
 | Shared processed artifacts | `eda_outputs/data_processing_v2/` | Preprocessed FIF files, feature tensors, fold manifests, reports |
-| Timeseries experiments | `eda_outputs/experiments/timeseries/` | `series_metrics.csv`, predictions, checkpoints, reports |
+| Timeseries experiments | `eda_outputs/experiments/timeseries/` | `series_metrics.csv`, `sarima_classification_metrics.csv`, predictions, checkpoints, reports |
 | ML experiments | `eda_outputs/experiments/ml/` | `fold_metrics.csv`, `aggregate_metrics.csv`, predictions, checkpoints |
 | DL experiments | `eda_outputs/experiments/dl/` | `fold_metrics.csv`, `aggregate_metrics.csv`, predictions, checkpoints |
-| Cross-family summaries | `eda_outputs/experiments/summary/` | CSV summaries, `metrics_summary.md`, overview plots |
+| Cross-family summaries | `eda_outputs/experiments/summary/` | CSV summaries, `metrics_summary.md`, `cross_family_leaderboard.csv`, overview plots |
 | Verification reports | `eda_outputs/experiments/verification/` | Verification CSVs and Markdown summaries |
 
 ---

@@ -122,6 +122,7 @@ Timeseries experiment outputs live under:
 Typical files:
 
 - `series_metrics.csv`
+- `sarima_classification_metrics.csv`
 - `predictions/*.csv`
 - `reports/*`
 - `checkpoints/*`
@@ -240,6 +241,7 @@ Example run:
 
 ```bash
 conda run -n drug-tox-env python tools/summarize_experiment_metrics.py --workspace-root /path/to/workspace
+conda run -n drug-tox-env python tools/workspace_reports.py cross_family_leaderboard --workspace-root /path/to/workspace
 ```
 
 Generated outputs:
@@ -249,6 +251,7 @@ Generated outputs:
 - `eda_outputs/experiments/summary/timeseries_metrics_summary.csv`
 - `eda_outputs/experiments/summary/all_metrics_long.csv`
 - `eda_outputs/experiments/summary/metrics_summary.md`
+- `eda_outputs/experiments/summary/cross_family_leaderboard.csv`
 
 ## Related docs
 

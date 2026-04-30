@@ -44,6 +44,13 @@ def build_parser() -> argparse.ArgumentParser:
     _add_common_arguments(plot_parser)
     plot_parser.add_argument("--summary-dir", default=None)
     plot_parser.add_argument("--plot-dir", default=None)
+
+    leaderboard_parser = subparsers.add_parser(
+        "cross_family_leaderboard",
+        help="Build a ROC/PRAUC leaderboard across timeseries, ML, and DL experiments.",
+    )
+    leaderboard_parser.add_argument("--workspace-root", default=None)
+    leaderboard_parser.add_argument("--output-file", default=None)
     return parser
 
 
@@ -68,6 +75,116 @@ def _load_pyplot():
 
 def _selected_families(requested_family: str, family_order: list[str]) -> list[str]:
     return list(family_order) if requested_family == "all" else [requested_family]
+
+
+def _read_metric_means_from_aggregate(aggregate_path: Path) -> dict[str, float]:
+    frame = pd.read_csv(aggregate_path)
+    if "metric" not in frame.columns or "mean" not in frame.columns:
+        return {}
+
+    metrics: dict[str, float] = {}
+    for row in frame.itertuples(index=False):
+        metric_name = str(getattr(row, "metric", ""))
+        mean_value = pd.to_numeric(pd.Series([getattr(row, "mean", float("nan"))]), errors="coerce").iloc[0]
+        if pd.notna(mean_value):
+            metrics[metric_name] = float(mean_value)
+    return metrics
+
+
+def _mean_numeric_column(frame: pd.DataFrame, column_name: str) -> float:
+    if column_name not in frame.columns:
+        return float("nan")
+    values = pd.to_numeric(frame[column_name], errors="coerce").dropna()
+    if values.empty:
+        return float("nan")
+    return float(values.mean())
+
+
+def _collect_classifier_family_rows(*, family_name: str, family_dir: Path) -> list[dict[str, Any]]:
+    if not family_dir.exists():
+        return []
+
+    rows: list[dict[str, Any]] = []
+    for preset_dir in sorted(path for path in family_dir.iterdir() if path.is_dir()):
+        aggregate_path = preset_dir / "aggregate_metrics.csv"
+        if not aggregate_path.exists():
+            continue
+
+        metric_means = _read_metric_means_from_aggregate(aggregate_path)
+        rows.append(
+            {
+                "family": family_name.upper(),
+                "preset": preset_dir.name,
+                "roc_auc": metric_means.get("roc_auc", float("nan")),
+                "average_precision": metric_means.get("average_precision", float("nan")),
+                "f1": metric_means.get("f1", float("nan")),
+                "precision": metric_means.get("precision", float("nan")),
+                "sensitivity": metric_means.get("sensitivity", float("nan")),
+                "specificity": metric_means.get("specificity", float("nan")),
+                "accuracy": metric_means.get("accuracy", float("nan")),
+                "n_runs": float("nan"),
+                "note": "native_classifier",
+                "source_file": aggregate_path.as_posix(),
+            }
+        )
+    return rows
+
+
+def _collect_timeseries_bridge_rows(timeseries_dir: Path) -> list[dict[str, Any]]:
+    if not timeseries_dir.exists():
+        return []
+
+    rows: list[dict[str, Any]] = []
+    for preset_dir in sorted(path for path in timeseries_dir.iterdir() if path.is_dir()):
+        clf_path = preset_dir / "sarima_classification_metrics.csv"
+        if not clf_path.exists():
+            continue
+
+        clf_frame = pd.read_csv(clf_path)
+        if clf_frame.empty:
+            continue
+
+        n_runs = int(clf_frame["run_id"].nunique()) if "run_id" in clf_frame.columns else int(len(clf_frame))
+        rows.append(
+            {
+                "family": "TIMESERIES",
+                "preset": preset_dir.name,
+                "roc_auc": _mean_numeric_column(clf_frame, "roc_auc"),
+                "average_precision": _mean_numeric_column(clf_frame, "average_precision"),
+                "f1": _mean_numeric_column(clf_frame, "f1"),
+                "precision": _mean_numeric_column(clf_frame, "precision"),
+                "sensitivity": _mean_numeric_column(clf_frame, "sensitivity"),
+                "specificity": _mean_numeric_column(clf_frame, "specificity"),
+                "accuracy": _mean_numeric_column(clf_frame, "accuracy"),
+                "n_runs": float(n_runs),
+                "note": "derived_from_residuals",
+                "source_file": clf_path.as_posix(),
+            }
+        )
+    return rows
+
+
+def build_cross_family_leaderboard(*, workspace_root: str | None, output_file: str | None) -> Path:
+    paths = resolve_workspace_paths(workspace_root)
+    experiments_root = paths.outputs_dir / "experiments"
+
+    rows: list[dict[str, Any]] = []
+    rows.extend(_collect_classifier_family_rows(family_name="ml", family_dir=experiments_root / "ml"))
+    rows.extend(_collect_classifier_family_rows(family_name="dl", family_dir=experiments_root / "dl"))
+    rows.extend(_collect_timeseries_bridge_rows(experiments_root / "timeseries"))
+
+    if not rows:
+        raise RuntimeError("No experiment metrics were found to build cross-family leaderboard.")
+
+    leaderboard = pd.DataFrame(rows)
+    sort_columns = [column for column in ("roc_auc", "average_precision", "f1") if column in leaderboard.columns]
+    if sort_columns:
+        leaderboard = leaderboard.sort_values(sort_columns, ascending=[False] * len(sort_columns), kind="mergesort")
+
+    output_path = Path(output_file).resolve() if output_file is not None else experiments_root / "summary" / "cross_family_leaderboard.csv"
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    leaderboard.to_csv(output_path, index=False)
+    return output_path
 
 
 def _render_family_plot(*, family: str, spec: dict[str, Any], summary_dir: Path, plot_dir: Path) -> Path | None:
@@ -119,6 +236,15 @@ def _render_family_plot(*, family: str, spec: dict[str, Any], summary_dir: Path,
 
 def main() -> int:
     args = build_parser().parse_args()
+
+    if args.task == "cross_family_leaderboard":
+        output_path = build_cross_family_leaderboard(
+            workspace_root=args.workspace_root,
+            output_file=args.output_file,
+        )
+        print(f"Cross-family leaderboard: {output_path.as_posix()}")
+        return 0
+
     resolved_config, family_order, family_specs, _ = _resolve_report_config(args.config)
 
     if args.task == "summarize":

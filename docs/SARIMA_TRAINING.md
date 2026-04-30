@@ -76,8 +76,20 @@ Training writes under `eda_outputs/<output_subdir>/`:
 - `summaries/*_sarima_summary.txt`
 - `sarima_run_config.json`
 
+When SARIMA runs through the experiment wrapper (`tools/run_timeseries_experiments.py`), a post-processing bridge also writes:
+
+- `eda_outputs/experiments/timeseries/<experiment_name>/sarima_classification_metrics.csv`
+
+This file converts test-split residuals into anomaly scores, then computes binary metrics (ROC-AUC, average precision, F1, precision, sensitivity, specificity, accuracy) using the shared `compute_binary_metrics()` utility.
+
 ## 6. Notes
 
-- This remains pure SARIMA, not SARIMAX. No exogenous regressors are passed into the model.
+- The trainer supports both SARIMA and SARIMAX. It runs as pure SARIMA when no exogenous columns are passed, and as SARIMAX when exogenous columns are configured.
 - Seasonal periods are interpreted in window steps and then converted to seconds using each run's median cadence.
 - If you want to model another v2 aggregate feature, change `--aggregate-feature-name` in `sarima-prep` and rerun the export.
+
+## 7. Interpretation caveats for SARIMA-derived classification metrics
+
+- SARIMA ROC-AUC and PR-AUC are derived from residual anomaly scores, not from a classifier trained directly for seizure labels.
+- The split policy is not symmetric with ML and DL: SARIMA uses chronological in-run splits, while ML and DL use LOSO subject holdout.
+- Thresholds are selected by per-run F1 sweep on the same test segment used for evaluation, which can inflate thresholded metrics.

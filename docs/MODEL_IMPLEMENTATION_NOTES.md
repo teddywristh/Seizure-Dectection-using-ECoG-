@@ -7,8 +7,9 @@ This file records how the repository-level experiment code maps to the model sou
 ### SARIMA / SARIMAX
 - Source reference: statsmodels SARIMAX plus SARIMA literature.
 - Repository implementation: [src/ds003029_eda/sarima_training.py](src/ds003029_eda/sarima_training.py)
+- Residual classification bridge: [src/ds003029_eda/experiments/sarima_clf_bridge.py](src/ds003029_eda/experiments/sarima_clf_bridge.py)
 - Fidelity: direct statsmodels-based implementation with repository-specific experiment wiring.
-- Notes: extended to support alternate scalar targets, optional exogenous regressors, changepoint detection with `ruptures`, and residual anomaly flags.
+- Notes: extended to support alternate scalar targets, optional exogenous regressors, changepoint detection with `ruptures`, residual anomaly flags, and residual-derived binary metrics.
 
 ### PELT changepoint detection
 - Source reference: `ruptures` PELT user guide and repo.

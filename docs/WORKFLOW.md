@@ -88,6 +88,7 @@ Summaries:
 ```bash
 python tools/workspace_reports.py summarize --family all --workspace-root /path/to/workspace
 python tools/workspace_reports.py summarize --family timeseries --workspace-root /path/to/workspace
+python tools/workspace_reports.py cross_family_leaderboard --workspace-root /path/to/workspace
 ```
 
 Metric plots:
@@ -106,7 +107,7 @@ python tools/workspace_reports.py verify --family dl --workspace-root /path/to/w
 
 Main outputs:
 - modeling outputs: `eda_outputs/experiments/{timeseries,ml,dl}/<experiment_name>/`
-- summaries: `eda_outputs/experiments/summary/`
+- summaries: `eda_outputs/experiments/summary/` (includes `cross_family_leaderboard.csv`)
 - plots: `eda_outputs/experiments/summary/plots/`
 - verification reports: `eda_outputs/experiments/verification/`
 
