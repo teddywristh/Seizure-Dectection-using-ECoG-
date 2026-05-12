@@ -1,0 +1,12 @@
+{
+  "family_order": [
+    "timeseries",
+    "ml",
+    "dl"
+  ],
+  "family_configs": {
+    "timeseries": "configs/experiments/timeseries_models.json",
+    "ml": "configs/experiments/ml_models.json",
+    "dl": "configs/experiments/dl_models.json"
+  }
+}

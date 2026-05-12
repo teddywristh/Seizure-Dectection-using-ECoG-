@@ -1,0 +1,35 @@
+{
+  "defaults": {
+    "artifact_subdir": "data_processing_v2",
+    "output_subdir": "experiments/timeseries",
+    "min_total_obs": 36,
+    "min_test_obs": 12,
+    "test_fraction": 0.2,
+    "changepoint_penalty": 10.0,
+    "residual_z_threshold": 2.5,
+    "sarima_prep_overwrite": false,
+    "training_output_name": "sarima_results"
+  },
+  "presets": {
+    "sarima_rms": {
+      "experiment_name": "sarima_rms",
+      "target_feature": "agg_mean_rms",
+      "exogenous_features": []
+    },
+    "sarimax_rms_std": {
+      "experiment_name": "sarimax_rms_std",
+      "target_feature": "agg_mean_rms",
+      "exogenous_features": ["agg_std_rms", "y_lagged"]
+    },
+    "sarimax_gamma": {
+      "experiment_name": "sarimax_gamma",
+      "target_feature": "agg_mean_gamma_high_power",
+      "exogenous_features": ["agg_std_gamma_high_power", "y_lagged"]
+    },
+    "sarimax_hjorth": {
+      "experiment_name": "sarimax_hjorth",
+      "target_feature": "agg_mean_hjorth_activity",
+      "exogenous_features": ["agg_std_hjorth_activity", "y_lagged"]
+    }
+  }
+}

@@ -1,3 +1,4 @@
+import argparse
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -7,14 +8,20 @@ import pandas as pd
 # Make `src/` importable when running as a script
 import sys
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
+REPO_ROOT = Path(__file__).resolve().parents[1]
+SRC_ROOT = REPO_ROOT / 'src'
+if str(SRC_ROOT) not in sys.path:
+    sys.path.insert(0, str(SRC_ROOT))
 
+from ds003029_eda.data.io import resolve_artifact_path  # noqa: E402
 from ds003029_eda.markers import first_onset_offset  # noqa: E402
+from ds003029_eda.paths import get_paths, resolve_workspace_root  # noqa: E402
 
 
-# Workspace-relative paths
-DATASET_ROOT = Path('EEG') / 'ds003029'
-RUN_SUMMARY = Path('eda_outputs') / 'ds003029_run_summary.csv'
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description='Validate seizure labels in ds003029 against readable events.tsv markers.')
+    parser.add_argument('--workspace-root', default=None)
+    return parser
 
 
 def parse_events_tsv(path: Path) -> Optional[Dict]:
@@ -36,10 +43,13 @@ def parse_events_tsv(path: Path) -> Optional[Dict]:
 
 
 def main() -> int:
-    if not RUN_SUMMARY.exists():
-        raise FileNotFoundError(f"Missing {RUN_SUMMARY.resolve()}")
+    args = build_parser().parse_args()
+    paths = get_paths(resolve_workspace_root(args.workspace_root))
+    run_summary = paths.outputs_dir / 'ds003029_run_summary.csv'
+    if not run_summary.exists():
+        raise FileNotFoundError(f"Missing {run_summary.resolve()}")
 
-    rs = pd.read_csv(RUN_SUMMARY)
+    rs = pd.read_csv(run_summary)
     if 'events_tsv' not in rs.columns:
         raise KeyError("run_summary missing 'events_tsv' column")
 
@@ -51,19 +61,9 @@ def main() -> int:
         if not isinstance(ev, str) or ev.strip() == '':
             continue
 
-        evp = Path(ev)
-        if not evp.is_absolute():
-            # In run_summary, events_tsv is usually already workspace-relative like 'EEG\\ds003029\\...'
-            # If it is relative, resolve it under workspace.
-            evp = Path(evp)
-        # Ensure existence
+        evp = resolve_artifact_path(ev, workspace=paths.workspace, outputs_dir=paths.outputs_dir)
         if not evp.exists():
-            # Try resolving from workspace root (cwd)
-            evp2 = Path(ev)
-            if evp2.exists():
-                evp = evp2
-            else:
-                continue
+            continue
 
         parsed = parse_events_tsv(evp)
         if parsed is None:

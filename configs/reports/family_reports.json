@@ -1,0 +1,71 @@
+{
+  "family_order": [
+    "timeseries",
+    "ml",
+    "dl"
+  ],
+  "families": {
+    "timeseries": {
+      "summary_file": "timeseries_metrics_summary.csv",
+      "long_file": "timeseries_metrics_long.csv",
+      "summary_markdown": "timeseries_metrics_summary.md",
+      "verification_results_file": "verification_results_timeseries.csv",
+      "verification_issues_file": "verification_issues_timeseries.csv",
+      "verification_summary_file": "verification_summary_timeseries.md",
+      "plot_file": "timeseries_metrics_overview.png",
+      "plot_metrics": [
+        "rmse_test_mean",
+        "mae_test_mean",
+        "smape_test_pct_mean",
+        "r2_test_mean"
+      ],
+      "plot_ascending": [
+        "rmse_test_mean",
+        "mae_test_mean",
+        "smape_test_pct_mean"
+      ],
+      "plot_color": "#ff7f0e"
+    },
+    "ml": {
+      "summary_file": "ml_metrics_summary.csv",
+      "long_file": "ml_metrics_long.csv",
+      "summary_markdown": "ml_metrics_summary.md",
+      "verification_results_file": "verification_results_ml.csv",
+      "verification_issues_file": "verification_issues_ml.csv",
+      "verification_summary_file": "verification_summary_ml.md",
+      "plot_file": "ml_metrics_overview.png",
+      "plot_metrics": [
+        "roc_auc_mean",
+        "average_precision_mean",
+        "f1_mean",
+        "accuracy_mean"
+      ],
+      "plot_ascending": [],
+      "plot_color": "#1f77b4"
+    },
+    "dl": {
+      "summary_file": "dl_metrics_summary.csv",
+      "long_file": "dl_metrics_long.csv",
+      "summary_markdown": "dl_metrics_summary.md",
+      "verification_results_file": "verification_results_dl.csv",
+      "verification_issues_file": "verification_issues_dl.csv",
+      "verification_summary_file": "verification_summary_dl.md",
+      "plot_file": "dl_metrics_overview.png",
+      "plot_metrics": [
+        "roc_auc_mean",
+        "average_precision_mean",
+        "f1_mean",
+        "accuracy_mean"
+      ],
+      "plot_ascending": [],
+      "plot_color": "#2ca02c"
+    }
+  },
+  "all": {
+    "summary_long_file": "all_metrics_long.csv",
+    "summary_markdown": "metrics_summary.md",
+    "verification_results_file": "verification_results.csv",
+    "verification_issues_file": "verification_issues.csv",
+    "verification_summary_file": "verification_summary.md"
+  }
+}
