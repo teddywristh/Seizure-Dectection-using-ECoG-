@@ -1,122 +1,96 @@
-# Seizure detection using ECoG workspace
+# A Unified Benchmarking Workspace for Window-Level Seizure Detection on OpenNeuro ds003029 ECoG
 
-Quick report for a repo-local `ds003029` workspace that benchmarks three modeling directions from the same curated ECoG/iEEG subset: **timeseries**, **machine learning**, and **deep learning**.
+This repository packages a full research workspace for window-level seizure detection on intracranial EEG / ECoG from OpenNeuro `ds003029`. It is designed as a unified benchmark and reproducibility environment rather than as a single-model paper. The workspace standardizes preprocessing, window labeling, feature extraction, evaluation, reporting, and artifact storage across three modeling directions: timeseries forecasting, classical machine learning, and deep learning.
 
-The repository is now self-contained: raw data lives under `EEG/ds003029/`, generated artifacts live under `eda_outputs/`, and task wrappers live under `tools/`.
+The current verified snapshot contains `21` completed experiments (`4` timeseries, `5` machine learning, `12` deep learning) with `0` verification errors and `0` warnings. On the present model-ready cohort, feature-engineered boosting is the strongest overall approach: `catboost` reaches ROC-AUC `0.8799` and average precision `0.8723`, outperforming the best tested deep model (`ce_tss_transformer`, ROC-AUC `0.8591`, AP `0.7752`) and the strongest residual-derived timeseries classifier (`sarimax_gamma`, ROC-AUC `0.8401`, AP `0.1804`).
 
----
+This README is written for technical reviewers who need to understand what the workspace claims, how the comparison is structured, what the main findings are, and how to reproduce the results from the repository-local data and scripts.
 
-## 📋 Table of contents
+## Overview
 
-- [At a glance](#-at-a-glance)
-- [Experiment results](#-experiment-results)
-- [Dataset](#-dataset)
-- [Data processing](#-data-processing)
-- [Methodology](#-methodology)
-- [Quick setup](#-quick-setup)
-- [Run experiments](#-run-experiments)
-- [Workspace outputs](#-workspace-outputs)
-- [Related documents](#-related-documents)
+### Study Scope
 
----
+The repository addresses a focused benchmarking question: under a shared preprocessing backbone and a common model-ready cohort, which modeling family provides the strongest practical seizure-detection performance?
 
-## 📋 At a glance
+The workspace is organized around three reviewer-facing research questions:
 
-| Direction | Primary question | Main input artifact | Analysis unit | Split and evaluation | Best current result | Best use case |
-| --- | --- | --- | --- | --- | --- | --- |
-| **Timeseries** | Can a scalar signal derived from each run be forecast and converted into residual-based anomaly classification scores? | `eda_outputs/data_processing_v2/sarima/ds003029_sarima_v2_input.csv` | One chronological window row within one run | Chronological train/test split inside each run, then residual-to-score bridge on test windows | Forecast track: `sarimax_hjorth` has the lowest RMSE mean at `3.6159e-08`; derived classification track: `sarimax_gamma` reaches ROC-AUC `0.8401`, AP `0.1804` | Run-level temporal baselines, residual diagnostics, anomaly-proxy seizure scoring |
-| **ML** | Can hand-crafted aggregate features classify seizure windows across held-out subjects? | `eda_outputs/data_processing_v2/folds/<fold_id>/{train,test}_dataset.npz` with `x_agg` | One labeled 2-second window with 48 aggregate features | Leave-one-subject-out folds plus grouped and stratified inner tuning | `catboost` reaches ROC-AUC `0.8799`, AP `0.8723`, F1 `0.6531` | Strongest current baseline on the curated subset |
-| **DL** | Can channel-feature tensors or raw signal windows learn seizure patterns directly? | Feature-channel folds from `folds/` and raw folds from `raw_folds/` | One labeled 2-second window as a tensor | Same leave-one-subject-out fold structure reused from ML | `ce_tss_transformer` reaches ROC-AUC `0.8591`, AP `0.7752`, F1 `0.6218` | Higher-capacity models when channel structure or raw signal structure matters |
+1. Under a unified pipeline, which family performs best on window-level seizure detection: timeseries, classical machine learning, or deep learning?
+2. On a small subject-held-out ECoG cohort, do engineered aggregate features remain stronger than the tested deep models?
+3. Can residual-derived SARIMA or SARIMAX provide a useful temporal baseline that is interpretable in the same reporting layer as ROC-AUC and PR-AUC?
 
-> **Important:** the timeseries direction now reports two metric tracks: forecast metrics (RMSE/MAE/sMAPE/$R^2$) and **derived** classification metrics (ROC-AUC/AP/F1) computed from SARIMA residual scores. Those derived classifier metrics are useful for comparison context, but they remain methodologically asymmetric vs ML and DL because timeseries uses in-run chronological splits (not LOSO subject holdout), and threshold tuning is done on the same test segment.
+### Main Contributions
 
----
+- A single processing and reporting pipeline is used across timeseries, machine learning, and deep learning experiments.
+- Leakage-safe leave-one-subject-out evaluation is implemented for machine learning and deep learning.
+- A residual-to-classification bridge allows timeseries forecasting outputs to be summarized with discrimination metrics such as ROC-AUC and average precision.
+- All major artifacts are stored repo-locally under `eda_outputs/`, allowing reviewers to inspect intermediate outputs, final summaries, and verification reports without reconstructing hidden steps.
 
-## 📊 Experiment results
+### Study Positioning
 
-The current workspace contains completed outputs for all three directions and passes the repo-local verification sweep.
+The central contribution of this repository is pipeline unification and evidence-backed cross-family comparison. It should not be read as a claim that a novel neural architecture has been introduced. The deep-learning models included here are best understood as architecture-faithful research adapters evaluated under one common data and reporting framework.
 
-| Scope | Current status |
+## Workspace Architecture
+
+![Research workspace flowchart](flowchart.png)
+
+The repository layout mirrors the research workflow.
+
+| Path | Research role |
 | --- | --- |
-| Total experiments checked | `21` |
-| Timeseries presets | `4` |
-| ML presets | `5` |
-| DL presets | `12` |
-| Verification errors | `0` |
-| Verification warnings | `0` |
+| `EEG/ds003029/` | Repo-local BIDS-format raw intracranial EEG / ECoG data |
+| `src/` | Preprocessing code, feature extraction, split logic, dataset loaders, and model implementations or adapters |
+| `tools/` | Command-line entrypoints for metadata refresh, data building, training, summarization, and verification |
+| `configs/` | Experiment presets and report configuration files |
+| `eda_outputs/` | Generated manifests, processed artifacts, trained-model outputs, and summary reports |
+| `docs/` | Workflow notes, method details, runbooks, and report-preparation evidence |
+| `notebooks/` | Exploratory analysis and QC notebooks |
+| `tests/` | Smoke checks and regression checks for the workspace |
 
-### Result snapshot by direction
+This structure is intentional: raw data, processing code, experiment presets, and output summaries are colocated so that reviewers can trace the path from source recordings to reported metrics.
 
-| Direction | Leader | Key metrics | Interpretation |
-| --- | --- | --- | --- |
-| **Timeseries** | `sarimax_gamma` (derived classifier) and `sarimax_hjorth` (forecast) | Derived ROC-AUC `0.8401`, AP `0.1804` (`sarimax_gamma`); lowest RMSE mean `3.6159e-08` (`sarimax_hjorth`) | Useful as residual-anomaly context and temporal forecasting baseline; derived AP remains far below top ML and DL classifiers |
-| **ML** | `catboost` | ROC-AUC `0.8799`, AP `0.8723`, F1 `0.6531`, precision `0.7308`, sensitivity `0.7248`, specificity `0.8315`, accuracy `0.7620` | Strongest overall direction on the current curated subset |
-| **DL** | `ce_tss_transformer` | ROC-AUC `0.8591`, AP `0.7752`, F1 `0.6218`, precision `0.6534`, sensitivity `0.6976`, specificity `0.7957`, accuracy `0.7416` | Best deep-learning result, but still behind the top ML baseline |
+## Data and Cohort
 
-### What stands out
+### Source Dataset
 
-- **Timeseries** gains a usable residual-derived ROC signal (`sarimax_gamma` ROC-AUC `0.8401`), but PRAUC remains low (`0.1804`), showing weak precision-recall behavior under class imbalance.
-- **ML** currently wins because the curated dataset is still small enough that strong hand-crafted features plus LOSO evaluation remain highly effective.
-- **DL** is competitive when the model can exploit channel structure, but weaker raw-signal adapters such as `bendr`, `biseizurere_proxy`, and `reve` show that not every architecture benefits equally from the current data scale.
+The upstream source is OpenNeuro `ds003029`, a BIDS-formatted intracranial EEG / ECoG dataset with BrainVision recordings, channel metadata, and event annotations. The experiments in this repository do not use every readable run in the full dataset. Instead, they use a curated model-ready subset selected through the repo's preprocessing and QC pipeline.
 
-### One command for all result summaries
+### Final Model-Ready Cohort
 
-```bash
-python3 tools/workspace_reports.py summarize --family all --workspace-root /path/to/Seizure-Dectection-using-ECoG-
-```
+| Item | Value |
+| --- | --- |
+| Source dataset | `ds003029` |
+| Modeling subjects | `8` |
+| Modeling ictal runs | `16` |
+| Total windows including boundary | `7646` |
+| Boundary windows | `64` |
+| Evaluable windows | `7582` |
+| Ictal windows | `3102` |
+| Interictal windows | `4480` |
+| Positive rate | `40.91%` |
+| Sampling rate after preprocessing | `256 Hz` |
+| Window length | `2.0 s` |
+| Step size | `0.5 s` |
+| Boundary exclusion margin | `0.5 s` |
 
-### One command for cross-family ROC/PRAUC leaderboard
+Window labels use a shared policy across the workspace:
 
-```bash
-python3 tools/workspace_reports.py cross_family_leaderboard --workspace-root /path/to/Seizure-Dectection-using-ECoG-
-```
+- `1` = ictal
+- `0` = interictal
+- `-1` = boundary window
 
-### One command for all result verification
+Subject heterogeneity is substantial. In the current subject-held-out setting, the number of positive windows in the held-out subject ranges from `33` to `889`. This matters when interpreting fold-to-fold variance in average precision, threshold stability, and F1.
 
-```bash
-python3 tools/workspace_reports.py verify --family all --workspace-root /path/to/Seizure-Dectection-using-ECoG-
-```
+### Family-Specific Data Views
 
----
+All three modeling families consume different projections of the same curated cohort.
 
-## 🗂 Dataset
-
-This workspace is built around OpenNeuro `ds003029`, a BIDS-formatted iEEG/ECoG dataset with BrainVision recordings, channel metadata, and event markers. The full dataset context is larger than the actively modeled subset in this repository, so it is useful to separate **dataset reference scope** from **current modeling scope**.
-
-| Item | Current workspace value | Why it matters |
+| Family | Primary artifact | Representation |
 | --- | --- | --- |
-| Source dataset | `ds003029` | Shared upstream source for all three directions |
-| Readable event inventory | `106` runs with readable `events.tsv` | Metadata and seizure interval QC pool |
-| Modeling-ready subset | `16` runs across `8` subjects | Actual subset used to build folds and experiments |
-| Post-preprocess sampling rate | `256 Hz` | Shared signal rate for downstream artifacts |
-| Window length | `2.0 s` | Shared unit for seizure windows |
-| Window step | `0.5 s` | Shared temporal stride |
-| Boundary margin | `0.5 s` | Shared exclusion rule around onset and offset |
+| Timeseries | `eda_outputs/data_processing_v2/sarima/ds003029_sarima_v2_input.csv` | Chronological scalar series per run using exported `rms` values |
+| Machine learning | `eda_outputs/data_processing_v2/folds/<fold_id>/{train,test}_dataset.npz` | Tabular `x_agg` feature matrices with `48` aggregate features per window |
+| Deep learning | `eda_outputs/data_processing_v2/folds/` and `eda_outputs/data_processing_v2/raw_folds/` | Channel-feature tensors `x_channel` or raw-signal tensors `x_raw` |
 
-### Current class balance
-
-The current labeled window inventory is:
-
-- Total windows: `7646`
-- Ictal windows: `3102`
-- Interictal windows: `4480`
-- Dropped boundary windows: `64`
-
-### How each direction sees the same dataset
-
-| Direction | What it consumes from the dataset | Practical view of the data |
-| --- | --- | --- |
-| **Timeseries** | One scalar target per chronological window row plus optional exogenous columns | A per-run forecasting table where order matters most |
-| **ML** | `x_agg` with shape `(N, 48)` | A tabular seizure-window classification problem |
-| **DL** | `x_channel` with shape `(N, max_channels, 16)` or `x_raw` with shape `(N, max_channels, n_samples)` | A tensor learning problem over channels or raw signal |
-
-### One command to refresh dataset manifests for the full workspace
-
-```bash
-python3 tools/workspace_content.py --workspace-root /path/to/Seizure-Dectection-using-ECoG-
-```
-
-That command refreshes:
+The metadata and cohort manifests are refreshed into `eda_outputs/` and include:
 
 - `ds003029_run_summary.csv`
 - `ds003029_marker_qc_by_run.csv`
@@ -124,186 +98,160 @@ That command refreshes:
 - `ds003029_content_run_manifest.csv`
 - `ds003029_model_ready_run_manifest.csv`
 
----
+## Methods
 
-## ⚙️ Data processing
+### Shared Processing Backbone
 
-All three directions share the same front half of the pipeline: metadata refresh, preprocessing, channel QC, windowing, and feature extraction. They diverge only at the last-mile artifact stage.
+The front half of the pipeline is shared across all three modeling directions.
 
-```mermaid
-flowchart LR
-	accTitle: Shared workspace pipeline
-	accDescr: Shared ds003029 workspace flow from raw BrainVision files through metadata, preprocessing, windowing, and family-specific artifacts for timeseries, machine learning, and deep learning.
+1. Refresh BIDS metadata, run inventories, and seizure-interval summaries.
+2. Preprocess each run to `256 Hz` with filtering, rereferencing, and bad-channel QC.
+3. Slice deterministic `2.0 s` windows with a `0.5 s` stride.
+4. Label windows with a midpoint rule and a `0.5 s` exclusion margin around seizure onsets and offsets.
+5. Extract `16` per-channel descriptors and aggregate them into `48` tabular features for machine learning.
+6. Export family-specific artifacts, train preset models, summarize metrics, and verify outputs.
 
-	raw[📥 Raw BrainVision runs] --> meta[📋 Metadata and marker QC]
-	meta --> prep[⚙️ Preprocess to 256 Hz]
-	prep --> qc[🔍 Bad-channel QC]
-	qc --> win[🧪 Windowing and labeling]
-	win --> feat[📊 Per-window feature extraction]
-	feat --> agg[📦 Aggregate fold tensors]
-	feat --> chan[🧠 Channel-feature tensors]
-	prep --> raw_dl[🌐 Raw fold export]
-	agg --> ts[⏰ Timeseries SARIMA bridge]
-	agg --> ml[⚙️ ML folds]
-	chan --> dl_feat[🧠 DL feature-channel folds]
-	raw_dl --> dl_raw[🧠 DL raw-signal folds]
+The feature inventory includes time-domain and spectral descriptors such as `rms`, `line_length`, Hjorth activity or mobility or complexity, spectral band powers, spectral entropy, and peak frequency.
 
-	classDef primary fill:#dbeafe,stroke:#2563eb,stroke-width:2px,color:#1e3a5f
-	classDef success fill:#dcfce7,stroke:#16a34a,stroke-width:2px,color:#14532d
-	class ts,ml,dl_feat,dl_raw success
-	class meta,prep,qc,win,feat,agg,chan,raw_dl primary
-```
+### Modeling Families and Evaluation Logic
 
-### Direction-specific outputs
-
-| Direction | Shared upstream artifacts | Final family-specific artifact |
-| --- | --- | --- |
-| **Timeseries** | Preprocessed runs plus aggregate features | `eda_outputs/data_processing_v2/sarima/ds003029_sarima_v2_input.csv` |
-| **ML** | Preprocessed runs plus aggregate features | `eda_outputs/data_processing_v2/folds/<fold_id>/{train,test}_dataset.npz` with `x_agg` |
-| **DL** | Preprocessed runs plus aggregate features and optional raw exports | `eda_outputs/data_processing_v2/folds/` for feature-channel DL and `eda_outputs/data_processing_v2/raw_folds/` for raw-signal DL |
-
-### What is shared and what is different
-
-| Step | Timeseries | ML | DL |
+| Family | Core method | Input view | Evaluation logic |
 | --- | --- | --- | --- |
-| Preprocessing | Shared | Shared | Shared |
-| Window labels | Shared | Shared | Shared |
-| Aggregate features | Shared | Shared | Shared for feature-channel DL |
-| SARIMA-ready CSV | Yes | No | No |
-| LOSO fold NPZ | No direct use | Yes | Yes |
-| Raw fold export | No | No | Yes for raw-signal models |
+| Timeseries | SARIMA or SARIMAX forecasting with residual scoring | One scalar series per run plus optional exogenous covariates | Chronological train/test split within each run; residuals transformed into anomaly scores |
+| Machine learning | Boosting, stacking, and SVM on engineered features | `x_agg` with `48` aggregate features | Leave-one-subject-out outer evaluation with subject-disjoint folds |
+| Deep learning | Channel-feature or raw-signal neural architectures | `x_channel` or `x_raw` tensors | Same leave-one-subject-out fold structure used for machine learning |
 
-### One command to rebuild the shared processing backbone for all three directions
+This design supports a strong within-workspace comparison, but it also creates one key asymmetry: the timeseries track is not a native seizure classifier and does not use the same subject-held-out split policy as machine learning and deep learning.
 
-```bash
-python3 tools/run_data_processing_v2.py full --workspace-root /path/to/Seizure-Dectection-using-ECoG- --artifact-subdir data_processing_v2 --overwrite
-```
+### Reported Metrics
 
-That command rebuilds the shared preprocessing, QC, windowing, and feature backbone used by **timeseries**, **ML**, and **DL**. For the full end-to-end family-specific outputs and training flow, use the one-command workspace rerun in [Run experiments](#-run-experiments).
+The reviewer-facing summary layer emphasizes:
 
----
+- ROC-AUC
+- Average precision
+- F1 score
+- Precision
+- Sensitivity
+- Specificity
+- Accuracy
 
-## 🧠 Methodology
+The timeseries family also reports forecast metrics such as RMSE and MAE. These forecast errors are useful for diagnosing the temporal model, but they are not directly comparable to classification metrics from machine learning and deep learning.
 
-The three directions answer related but different questions, so the methodology should be compared side by side rather than merged into one generic modeling story.
+## Results
 
-### Shared methodological rules
+### Headline Results
 
-- Binary window labels: `1=ictal`, `0=interictal`, `-1=boundary`
-- Train-only normalization inside each fold where applicable
-- Subject-aware evaluation for ML and DL
-- Repo-local artifacts under `eda_outputs/`
+The current verified snapshot yields the following family leaders.
 
-### Family-by-family methodology
-
-| Direction | Core method | Input representation | Validation logic | Strength | Main limitation |
-| --- | --- | --- | --- | --- | --- |
-| **Timeseries** | SARIMA or SARIMAX over a scalar target such as `rms` | Chronological rows per run with optional exogenous columns | Train and test split chronologically inside each run | Preserves temporal order and supports residual analysis | Not directly optimized for seizure classification metrics |
-| **ML** | Gradient boosting, stacking, and SVM over aggregate features | `x_agg` with 48 dimensions built from 16 per-channel features and `mean/std/max` reducers | Leave-one-subject-out outer evaluation plus grouped and stratified inner tuning | Strongest performance on the current curated subset | Depends on hand-crafted feature engineering |
-| **DL** | Architecture-faithful adapters over feature-channel tensors or raw windows | `x_channel` or `x_raw` tensors plus masks | Same LOSO fold separation as ML | Can exploit channel structure and richer representation learning | More sensitive to data scale, implementation fidelity, and compute |
-
-### Feature inventory used by ML and part of DL
-
-Per-channel feature families include:
-
-- Time-domain: `rms`, `line_length`, `hjorth_activity`, `hjorth_mobility`, `hjorth_complexity`, `zero_crossing_rate`, `kurtosis`, `skewness`
-- Frequency-domain: `delta_power`, `theta_power`, `alpha_power`, `beta_power`, `gamma_low_power`, `gamma_high_power`, `spectral_entropy`, `peak_frequency`
-
-The strongest aggregate separators in the current workspace are dominated by `beta_power`, `gamma_low_power`, and `line_length`, which helps explain why the ML track is so strong.
-
-### Model fidelity note
-
-- **Timeseries** and **ML** are mostly direct library-backed implementations.
-- **DL** models are mostly architecture-faithful repository adapters rather than byte-for-byte reproductions of upstream training pipelines.
-- `biseizurere_proxy` is explicitly a surrogate adapter, not a source-faithful public reimplementation.
-
----
-
-## 🚀 Quick setup
-
-Use `python3` in this workspace. Some environments still map `python` to Python 2, so the quick path below assumes `python3` explicitly.
-
-### Prerequisites
-
-| Requirement | Recommendation | Check command |
+| Family | Best model | Main metrics |
 | --- | --- | --- |
-| Python | `python3` on PATH | `python3 --version` |
-| Package installer | `pip` for the same interpreter | `python3 -m pip --version` |
-| Optional environment | Conda or venv | `conda --version` or `python3 -m venv --help` |
+| Timeseries forecast | `sarimax_hjorth` | RMSE mean `3.6159e-08`, MAE mean `2.5584e-08` |
+| Timeseries residual classifier | `sarimax_gamma` | ROC-AUC `0.8401`, AP `0.1804`, F1 `0.1954` |
+| Machine learning | `catboost` | ROC-AUC `0.8799`, AP `0.8723`, F1 `0.6531`, accuracy `0.7620` |
+| Deep learning | `ce_tss_transformer` | ROC-AUC `0.8591`, AP `0.7752`, F1 `0.6218`, accuracy `0.7416` |
 
-### One-command install
+### Cross-Family Ranking
+
+Top models by ROC-AUC from the current `eda_outputs/experiments/summary/cross_family_leaderboard.csv` snapshot are:
+
+| Rank | Family | Model | ROC-AUC | Average precision | F1 |
+| --- | --- | --- | ---: | ---: | ---: |
+| 1 | Machine learning | `catboost` | `0.8799` | `0.8723` | `0.6531` |
+| 2 | Deep learning | `ce_tss_transformer` | `0.8591` | `0.7752` | `0.6218` |
+| 3 | Machine learning | `lightgbm_dart` | `0.8482` | `0.8137` | `0.6320` |
+| 4 | Timeseries | `sarimax_gamma` | `0.8401` | `0.1804` | `0.1954` |
+| 5 | Machine learning | `xgboost_optuna` | `0.8394` | `0.7702` | `0.6173` |
+
+### Interpretation
+
+Three conclusions are supported by the current outputs.
+
+First, feature-engineered boosting is the strongest practical baseline on this cohort. `catboost` leads the workspace on both ROC-AUC and average precision, suggesting that carefully engineered aggregate descriptors remain highly competitive when data volume is modest and subject heterogeneity is high.
+
+Second, deep learning is competitive but not dominant in the present setting. `ce_tss_transformer` is the best tested deep model and performs credibly, yet it still trails the top machine-learning baseline on both discrimination and precision-recall behavior.
+
+Third, the timeseries branch is most useful as an interpretable temporal baseline rather than as the strongest detector. `sarimax_gamma` produces a reasonable ROC-AUC signal, but its average precision remains low, showing that residual-derived anomaly scoring is much weaker than the best native classifiers under class imbalance.
+
+## Methodological Caveats and Limitations
+
+The README should be read together with the following limitations.
+
+- The cohort is relatively small after strict model-readiness filtering, with only `8` subjects and `16` ictal runs in the final benchmark.
+- Subject heterogeneity is large, which likely contributes to fold-to-fold instability in average precision and thresholded metrics.
+- Machine learning and deep learning use leakage-safe leave-one-subject-out evaluation, whereas timeseries uses chronological train/test splits within each run.
+- Timeseries classification metrics are derived from residual scoring rather than from a native classifier.
+- Several deep-learning implementations are architecture-faithful adapters rather than byte-for-byte reproductions of original upstream training code.
+
+These caveats do not invalidate the benchmark, but they do define how its conclusions should be interpreted.
+
+## Reproducibility
+
+### Environment
+
+The latest verified refresh was generated from conda environment `drug-tox-env` on Python `3.10.20`.
 
 ```bash
-python3 -m pip install -r requirements.txt
+conda create -n drug-tox-env python=3.10 -y
+conda activate drug-tox-env
+
+# PyTorch is intentionally excluded from requirements.txt.
+conda install pytorch pytorch-cuda -c pytorch -c nvidia
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+
+# Optional GPU check
+python -c "import torch; print(torch.cuda.is_available(), torch.version.cuda, torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'cpu')"
 ```
 
-### Optional one-command health check
+If your shell resolves `python` incorrectly, use `python3` or the explicit conda interpreter.
+
+### Recommended Staged Rerun
+
+The staged workflow is the clearest path for reproducing the entire study.
 
 ```bash
-python3 tools/workspace_reports.py verify --family all --workspace-root /path/to/Seizure-Dectection-using-ECoG-
+export WORKSPACE_ROOT="$(pwd)"
+
+python tools/workspace_content.py --workspace-root "$WORKSPACE_ROOT"
+
+python tools/workspace_data.py timeseries --workspace-root "$WORKSPACE_ROOT"
+python tools/workspace_data.py ml --workspace-root "$WORKSPACE_ROOT"
+python tools/workspace_data.py dl --workspace-root "$WORKSPACE_ROOT"
+
+python tools/workspace_experiment.py all --workspace-root "$WORKSPACE_ROOT" --force-retrain
+
+python tools/workspace_reports.py summarize --family all --workspace-root "$WORKSPACE_ROOT"
+python tools/workspace_reports.py cross_family_leaderboard --workspace-root "$WORKSPACE_ROOT"
+python tools/workspace_reports.py verify --family all --workspace-root "$WORKSPACE_ROOT"
 ```
 
-That verification command is useful when the workspace already contains artifacts and you want a quick confidence check before rerunning anything.
+### Convenience Full-Pipeline Rerun
 
----
-
-## 🚀 Run experiments
-
-### Fastest one-command full-workspace rerun
+`tools/run_workspace_pipeline.py` remains available when a one-command bulk rerun is preferable.
 
 ```bash
-python3 tools/run_workspace_pipeline.py --workspace-root /path/to/Seizure-Dectection-using-ECoG-
+python tools/run_workspace_pipeline.py --workspace-root "$WORKSPACE_ROOT"
 ```
 
-That single command runs the default stage chain:
+### Key Output Files After a Successful Rerun
 
-- metadata refresh
-- shared data processing
-- timeseries presets
-- ML presets
-- DL presets
-- summary generation
-- verification
-
-### One-command all-presets training only
-
-If shared artifacts already exist and you only want the canonical experiments across all three directions:
-
-```bash
-python3 tools/workspace_experiment.py all --workspace-root /path/to/Seizure-Dectection-using-ECoG- --force-retrain
-```
-
-### When to use each command
-
-| Command | Use when |
+| Output | Path |
 | --- | --- |
-| `run_workspace_pipeline.py` | You want an end-to-end rerun for the full workspace |
-| `workspace_experiment.py all` | You already trust the processed artifacts and only want to retrain the full experiment suite |
-| `workspace_reports.py summarize --family all` | You want refreshed per-family summary tables and markdown without retraining |
-| `workspace_reports.py cross_family_leaderboard` | You want one ROC/PRAUC ranking table across timeseries, ML, and DL |
-| `workspace_reports.py verify --family all` | You want to confirm all existing outputs are complete and consistent |
+| Cross-family leaderboard | `eda_outputs/experiments/summary/cross_family_leaderboard.csv` |
+| Machine-learning summary | `eda_outputs/experiments/summary/ml_metrics_summary.csv` |
+| Deep-learning summary | `eda_outputs/experiments/summary/dl_metrics_summary.csv` |
+| Timeseries summary | `eda_outputs/experiments/summary/timeseries_metrics_summary.csv` |
+| Verification report | `eda_outputs/experiments/verification/verification_summary.md` |
 
----
+## Repository Guide
 
-## 📦 Workspace outputs
+The most relevant supporting documents for reviewers are:
 
-| Output family | Main location | What you should expect |
-| --- | --- | --- |
-| Metadata and manifests | `eda_outputs/` | Run summary, marker QC, seizure intervals, content manifests |
-| Shared processed artifacts | `eda_outputs/data_processing_v2/` | Preprocessed FIF files, feature tensors, fold manifests, reports |
-| Timeseries experiments | `eda_outputs/experiments/timeseries/` | `series_metrics.csv`, `sarima_classification_metrics.csv`, predictions, checkpoints, reports |
-| ML experiments | `eda_outputs/experiments/ml/` | `fold_metrics.csv`, `aggregate_metrics.csv`, predictions, checkpoints |
-| DL experiments | `eda_outputs/experiments/dl/` | `fold_metrics.csv`, `aggregate_metrics.csv`, predictions, checkpoints |
-| Cross-family summaries | `eda_outputs/experiments/summary/` | CSV summaries, `metrics_summary.md`, `cross_family_leaderboard.csv`, overview plots |
-| Verification reports | `eda_outputs/experiments/verification/` | Verification CSVs and Markdown summaries |
+- [docs/WORKFLOW.md](docs/WORKFLOW.md)
+- [docs/EXPERIMENT_RUNBOOK.md](docs/EXPERIMENT_RUNBOOK.md)
+- [docs/data_processing_v2.md](docs/data_processing_v2.md)
+- [docs/MODELING_DATA_QUICK_REFERENCE.md](docs/MODELING_DATA_QUICK_REFERENCE.md)
+- [docs/SARIMA_TRAINING.md](docs/SARIMA_TRAINING.md)
+- [docs/FINAL_REPORT_PREPARATION_NOTES.md](docs/FINAL_REPORT_PREPARATION_NOTES.md)
 
----
-
-## 🔗 Related documents
-
-- [Workflow guide](docs/WORKFLOW.md)
-- [Modeling data quick reference](docs/MODELING_DATA_QUICK_REFERENCE.md)
-- [SARIMA training guide](docs/SARIMA_TRAINING.md)
-- [Experiment runbook](docs/EXPERIMENT_RUNBOOK.md)
-- [Model implementation notes](MODEL_IMPLEMENTATION_NOTES.md)
-- [Four-section presentation report](docs/PRESENTATION_4_SECTION_REPORT_vi.md)
+Together, these documents provide the implementation detail behind the benchmark summary presented here.
